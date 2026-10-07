@@ -12,20 +12,26 @@ import {
   Alert,
   MenuItem,
   Chip,
+  CircularProgress,
 } from '@mui/material';
 import SchoolIcon from '@mui/icons-material/School';
 import GoogleIcon from '@mui/icons-material/Google';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { api } from '../services/api.js';
+import { useAppDispatch } from '../store/index.js';
+import { setCredentials } from '../store/slices/authSlice.js';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const [searchParams] = useSearchParams();
   const initialTenant = searchParams.get('tenant') || 'apex-uni';
 
   const [tenantSlug, setTenantSlug] = useState(initialTenant);
   const [email, setEmail] = useState('admin@apex.edu');
   const [password, setPassword] = useState('Password123!');
-  const [error] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const demoAccounts = [
     { role: 'SUPER_ADMIN', email: 'superadmin@edusphere.io', tenant: 'global', label: 'Super Admin' },
@@ -37,15 +43,39 @@ export const LoginPage: React.FC = () => {
   const handleQuickFill = (acc: typeof demoAccounts[0]) => {
     setEmail(acc.email);
     setPassword('Password123!');
-    if (acc.tenant !== 'global') {
-      setTenantSlug(acc.tenant);
-    }
+    setTenantSlug(acc.tenant);
+    setError(null);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Handled in auth flow integration
-    alert(`Demo Login submitted for: ${email} [Tenant: ${tenantSlug}]`);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const res = await api.post('/auth/login', {
+        email,
+        password,
+        tenantSlug: tenantSlug === 'global' ? undefined : tenantSlug,
+      });
+
+      if (res.data.success) {
+        const { user, accessToken, tenant } = res.data.data;
+        dispatch(
+          setCredentials({
+            user,
+            token: accessToken,
+            tenant: tenant || undefined,
+          })
+        );
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || 'Login failed. Please check your credentials.';
+      setError(msg);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -126,7 +156,9 @@ export const LoginPage: React.FC = () => {
               onChange={(e) => setTenantSlug(e.target.value)}
               fullWidth
               size="small"
+              disabled={isLoading}
             >
+              <MenuItem value="global">Global Platform (Super Admin)</MenuItem>
               <MenuItem value="apex-uni">Apex University (apex.edusphere.io)</MenuItem>
               <MenuItem value="oakridge-col">Oakridge College (oakridge.edusphere.io)</MenuItem>
               <MenuItem value="summit-inst">Summit Tech Institute (summit.edusphere.io)</MenuItem>
@@ -140,6 +172,7 @@ export const LoginPage: React.FC = () => {
               fullWidth
               size="small"
               required
+              disabled={isLoading}
             />
 
             <TextField
@@ -150,6 +183,7 @@ export const LoginPage: React.FC = () => {
               fullWidth
               size="small"
               required
+              disabled={isLoading}
             />
 
             <Button
@@ -158,9 +192,10 @@ export const LoginPage: React.FC = () => {
               color="primary"
               size="large"
               fullWidth
+              disabled={isLoading}
               sx={{ py: 1.2, fontWeight: 700 }}
             >
-              Sign In
+              {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Sign In'}
             </Button>
           </Stack>
         </form>
@@ -177,6 +212,7 @@ export const LoginPage: React.FC = () => {
           color="inherit"
           startIcon={<GoogleIcon />}
           onClick={() => alert('Initiating Google OAuth2 authorization...')}
+          disabled={isLoading}
           sx={{ py: 1, borderColor: 'divider', fontWeight: 600 }}
         >
           Google Workspace Account

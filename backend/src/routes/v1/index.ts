@@ -2,8 +2,12 @@ import { Router, Request, Response } from 'express';
 import { sendSuccess } from '../../utils/response.util.js';
 import { redis } from '../../config/redis.js';
 import mongoose from 'mongoose';
+import authRoutes from './auth.routes.js';
 
 const router = Router();
+
+// Mount Auth Sub-router
+router.use('/auth', authRoutes);
 
 // Health check endpoint (Used by Docker, CI/CD, and monitoring)
 router.get('/healthz', async (_req: Request, res: Response) => {

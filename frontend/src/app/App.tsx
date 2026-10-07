@@ -7,8 +7,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { theme } from '../theme/index.js';
 import { store } from '../store/index.js';
 import { PublicLayout } from '../layouts/PublicLayout.js';
+import { DashboardLayout } from '../layouts/DashboardLayout.js';
 import { LandingPage } from '../pages/LandingPage.js';
 import { LoginPage } from '../pages/LoginPage.js';
+import { DashboardPage } from '../pages/DashboardPage.js';
+import { ProtectedRoute } from '../routes/ProtectedRoute.js';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +39,13 @@ export const App: React.FC = () => {
               <Route path="/" element={<PublicLayout />}>
                 <Route index element={<LandingPage />} />
                 <Route path="login" element={<LoginPage />} />
+              </Route>
+
+              {/* Protected Authenticated Surface */}
+              <Route element={<ProtectedRoute />}>
+                <Route element={<DashboardLayout />}>
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                </Route>
               </Route>
 
               {/* Fallback */}
