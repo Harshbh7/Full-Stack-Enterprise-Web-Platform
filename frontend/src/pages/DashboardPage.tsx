@@ -74,6 +74,13 @@ export const DashboardPage: React.FC = () => {
   // Success alert state
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Focus safety helper to avoid browser aria-hidden focus blocking
+  const safeBlur = () => {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  };
+
   // 1. Invite User Dialog State
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteForm, setInviteForm] = useState({
@@ -305,6 +312,7 @@ export const DashboardPage: React.FC = () => {
 
   // Open Lesson Player
   const handleOpenLesson = (course: string, title: string) => {
+    safeBlur();
     setCurrentLesson({
       course,
       title,
@@ -318,6 +326,7 @@ export const DashboardPage: React.FC = () => {
 
   // Open Quiz Runner
   const handleOpenQuiz = (title = 'CAP646 Midterm Assessment: Multi-Tenancy & Architecture') => {
+    safeBlur();
     setSelectedQuizTitle(title);
     setQuizAnswers({});
     setQuizSubmitted(false);
@@ -521,7 +530,10 @@ export const DashboardPage: React.FC = () => {
                     variant="contained"
                     color="primary"
                     startIcon={<AddIcon />}
-                    onClick={() => setInviteOpen(true)}
+                    onClick={() => {
+                      safeBlur();
+                      setInviteOpen(true);
+                    }}
                   >
                     Invite Users
                   </Button>
@@ -531,7 +543,10 @@ export const DashboardPage: React.FC = () => {
                     variant="contained"
                     color="primary"
                     startIcon={<AddIcon />}
-                    onClick={() => setCourseOpen(true)}
+                    onClick={() => {
+                      safeBlur();
+                      setCourseOpen(true);
+                    }}
                   >
                     Create Course
                   </Button>
@@ -541,7 +556,10 @@ export const DashboardPage: React.FC = () => {
                     variant="outlined"
                     color="primary"
                     startIcon={<CampaignIcon />}
-                    onClick={() => setAnnouncementOpen(true)}
+                    onClick={() => {
+                      safeBlur();
+                      setAnnouncementOpen(true);
+                    }}
                   >
                     Post Announcement
                   </Button>
@@ -660,7 +678,10 @@ export const DashboardPage: React.FC = () => {
                 variant="contained"
                 size="small"
                 startIcon={<AddIcon />}
-                onClick={() => setInviteOpen(true)}
+                onClick={() => {
+                  safeBlur();
+                  setInviteOpen(true);
+                }}
               >
                 Invite User
               </Button>
@@ -741,7 +762,14 @@ export const DashboardPage: React.FC = () => {
               </Typography>
             </Box>
             {(user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR' || user?.role === 'SUPER_ADMIN') && (
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCourseOpen(true)}>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => {
+                  safeBlur();
+                  setCourseOpen(true);
+                }}
+              >
                 Add New Course
               </Button>
             )}
@@ -803,7 +831,14 @@ export const DashboardPage: React.FC = () => {
               </Typography>
             </Box>
             {(user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR' || user?.role === 'SUPER_ADMIN') && (
-              <Button variant="contained" startIcon={<CampaignIcon />} onClick={() => setAnnouncementOpen(true)}>
+              <Button
+                variant="contained"
+                startIcon={<CampaignIcon />}
+                onClick={() => {
+                  safeBlur();
+                  setAnnouncementOpen(true);
+                }}
+              >
                 New Announcement
               </Button>
             )}
@@ -1092,7 +1127,16 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {/* ======================= DIALOG: INVITE USER ======================= */}
-      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={inviteOpen}
+        onClose={() => {
+          safeBlur();
+          setInviteOpen(false);
+        }}
+        disableRestoreFocus
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle sx={{ fontWeight: 800 }}>Invite Student or Instructor</DialogTitle>
         <form onSubmit={handleInviteSubmit}>
           <DialogContent>
@@ -1148,7 +1192,16 @@ export const DashboardPage: React.FC = () => {
       </Dialog>
 
       {/* ======================= DIALOG: POST ANNOUNCEMENT ======================= */}
-      <Dialog open={announcementOpen} onClose={() => setAnnouncementOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={announcementOpen}
+        onClose={() => {
+          safeBlur();
+          setAnnouncementOpen(false);
+        }}
+        disableRestoreFocus
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle sx={{ fontWeight: 800 }}>Broadcast Announcement</DialogTitle>
         <form onSubmit={handleAnnouncementSubmit}>
           <DialogContent>
@@ -1194,7 +1247,16 @@ export const DashboardPage: React.FC = () => {
       </Dialog>
 
       {/* ======================= DIALOG: CREATE COURSE ======================= */}
-      <Dialog open={courseOpen} onClose={() => setCourseOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={courseOpen}
+        onClose={() => {
+          safeBlur();
+          setCourseOpen(false);
+        }}
+        disableRestoreFocus
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle sx={{ fontWeight: 800 }}>Create New Course</DialogTitle>
         <form onSubmit={handleCourseSubmit}>
           <DialogContent>
@@ -1254,7 +1316,16 @@ export const DashboardPage: React.FC = () => {
       </Dialog>
 
       {/* ======================= DIALOG: LESSON PLAYER MODAL ======================= */}
-      <Dialog open={lessonModalOpen} onClose={() => setLessonModalOpen(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={lessonModalOpen}
+        onClose={() => {
+          safeBlur();
+          setLessonModalOpen(false);
+        }}
+        disableRestoreFocus
+        maxWidth="md"
+        fullWidth
+      >
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -1308,7 +1379,16 @@ export const DashboardPage: React.FC = () => {
       </Dialog>
 
       {/* ======================= DIALOG: QUIZ RUNNER MODAL ======================= */}
-      <Dialog open={quizModalOpen} onClose={() => setQuizModalOpen(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={quizModalOpen}
+        onClose={() => {
+          safeBlur();
+          setQuizModalOpen(false);
+        }}
+        disableRestoreFocus
+        maxWidth="md"
+        fullWidth
+      >
         <DialogTitle sx={{ fontWeight: 800 }}>
           {selectedQuizTitle}
         </DialogTitle>

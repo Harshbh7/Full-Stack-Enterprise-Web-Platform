@@ -92,5 +92,20 @@ export const theme = createTheme({
         },
       },
     },
+    MuiDialog: {
+      defaultProps: {
+        disableRestoreFocus: true,
+      },
+    },
+    MuiModal: {
+      defaultProps: {
+        disableRestoreFocus: true,
+      },
+    },
+    MuiPopover: {
+      defaultProps: {
+        disableRestoreFocus: true,
+      },
+    },
   },
 });

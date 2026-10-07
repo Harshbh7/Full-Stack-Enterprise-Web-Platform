@@ -308,6 +308,7 @@ export const DashboardLayout: React.FC = () => {
               open={Boolean(notificationsAnchor)}
               anchorEl={notificationsAnchor}
               onClose={() => setNotificationsAnchor(null)}
+              disableRestoreFocus
               anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
               transformOrigin={{ vertical: 'top', horizontal: 'right' }}
               PaperProps={{ sx: { width: 340, p: 2, borderRadius: 2 } }}
@@ -362,6 +363,7 @@ export const DashboardLayout: React.FC = () => {
           variant="temporary"
           open={mobileOpen}
           onClose={handleDrawerToggle}
+          disableRestoreFocus
           ModalProps={{ keepMounted: true }}
           sx={{
             display: { xs: 'block', md: 'none' },
