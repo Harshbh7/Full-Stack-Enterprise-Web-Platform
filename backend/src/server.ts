@@ -6,6 +6,8 @@ import { connectDatabase } from './config/db.js';
 import { redis } from './config/redis.js';
 import { logger } from './config/logger.js';
 
+import { isOriginAllowed } from './config/cors.js';
+
 const startServer = async () => {
   // Connect to persistent MongoDB
   await connectDatabase();
@@ -13,10 +15,16 @@ const startServer = async () => {
   const app = createApp();
   const httpServer = http.createServer(app);
 
-  // Setup Socket.IO Server with CORS
+  // Setup Socket.IO Server with Dynamic CORS
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: [env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000'],
+      origin: (origin, callback) => {
+        if (isOriginAllowed(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Origin not allowed by Socket.IO CORS'));
+        }
+      },
       credentials: true,
       methods: ['GET', 'POST'],
     },

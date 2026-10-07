@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import { env } from './config/env.js';
+import { corsOptions } from './config/cors.js';
 import { resolveTenant } from './middleware/tenant.middleware.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { notFoundHandler } from './middleware/notFound.middleware.js';
@@ -16,15 +17,8 @@ export const createApp = (): Application => {
   // Security Headers
   app.use(helmet());
 
-  // CORS Configuration
-  app.use(
-    cors({
-      origin: [env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000'],
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID'],
-    })
-  );
+  // Dynamic CORS Configuration
+  app.use(cors(corsOptions));
 
   // HTTP Request Logging
   if (env.NODE_ENV !== 'test') {

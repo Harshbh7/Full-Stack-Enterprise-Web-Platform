@@ -8,6 +8,7 @@ export interface IJwtPayload {
   email: string;
   role: UserRole;
   tenantId?: string;
+  jti?: string;
   iat?: number;
   exp?: number;
 }
