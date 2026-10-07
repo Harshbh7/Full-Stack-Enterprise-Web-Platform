@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Drawer,
@@ -20,6 +20,8 @@ import {
   Badge,
   useMediaQuery,
   useTheme,
+  Popover,
+  MenuItem,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import SchoolIcon from '@mui/icons-material/School';
@@ -34,6 +36,7 @@ import CorporateFareIcon from '@mui/icons-material/CorporateFare';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import LogoutIcon from '@mui/icons-material/Logout';
 import InsightsIcon from '@mui/icons-material/Insights';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAppDispatch, useAppSelector } from '../store/index.js';
 import { logout } from '../store/slices/authSlice.js';
 
@@ -41,13 +44,36 @@ const DRAWER_WIDTH = 260;
 
 export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentView = searchParams.get('view') || 'overview';
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const dispatch = useAppDispatch();
   const { user, tenant } = useAppSelector((state) => state.auth);
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [notificationsAnchor, setNotificationsAnchor] = useState<null | HTMLElement>(null);
+  const [notifications, setNotifications] = useState([
+    {
+      id: 1,
+      title: 'Quiz Graded: Perfect Score! (30/30)',
+      time: '2 hours ago',
+      read: false,
+    },
+    {
+      id: 2,
+      title: 'CAP646: CA2 & CA3 Defense Checkpoints Released',
+      time: '5 hours ago',
+      read: false,
+    },
+    {
+      id: 3,
+      title: 'Welcome to Academic Year 2026-2027 at Apex University',
+      time: '1 day ago',
+      read: false,
+    },
+  ]);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -58,40 +84,52 @@ export const DashboardLayout: React.FC = () => {
     navigate('/login');
   };
 
-  // Role-tailored Navigation Items
+  const handleSelectView = (view: string) => {
+    navigate(`/dashboard?view=${view}`);
+    if (isMobile) setMobileOpen(false);
+  };
+
+  const handleMarkAllRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setNotificationsAnchor(null);
+  };
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  // Role-tailored Navigation Items with distinct views
   const getNavItems = () => {
     switch (user?.role) {
       case 'SUPER_ADMIN':
         return [
-          { text: 'Platform Overview', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'Tenants Directory', icon: <CorporateFareIcon />, path: '/dashboard' },
-          { text: 'System Telemetry', icon: <InsightsIcon />, path: '/dashboard' },
-          { text: 'Global Settings', icon: <SettingsIcon />, path: '/dashboard' },
+          { text: 'Platform Overview', icon: <DashboardIcon />, view: 'overview' },
+          { text: 'Tenants Directory', icon: <CorporateFareIcon />, view: 'tenants' },
+          { text: 'System Telemetry', icon: <InsightsIcon />, view: 'telemetry' },
+          { text: 'Global Settings', icon: <SettingsIcon />, view: 'settings' },
         ];
       case 'TENANT_ADMIN':
         return [
-          { text: 'Admin Overview', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'User Directory', icon: <PeopleIcon />, path: '/dashboard' },
-          { text: 'Courses & Catalog', icon: <AutoStoriesIcon />, path: '/dashboard' },
-          { text: 'Announcements', icon: <CampaignIcon />, path: '/dashboard' },
-          { text: 'Tenant Settings', icon: <SettingsIcon />, path: '/dashboard' },
+          { text: 'Admin Overview', icon: <DashboardIcon />, view: 'overview' },
+          { text: 'User Directory', icon: <PeopleIcon />, view: 'users' },
+          { text: 'Courses & Catalog', icon: <AutoStoriesIcon />, view: 'courses' },
+          { text: 'Announcements', icon: <CampaignIcon />, view: 'announcements' },
+          { text: 'Tenant Settings', icon: <SettingsIcon />, view: 'settings' },
         ];
       case 'INSTRUCTOR':
         return [
-          { text: 'Instructor Hub', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'Course Builder', icon: <AutoStoriesIcon />, path: '/dashboard' },
-          { text: 'Quiz Authoring', icon: <QuizIcon />, path: '/dashboard' },
-          { text: 'Grading Center', icon: <GradeIcon />, path: '/dashboard' },
-          { text: 'Announcements', icon: <CampaignIcon />, path: '/dashboard' },
+          { text: 'Instructor Hub', icon: <DashboardIcon />, view: 'overview' },
+          { text: 'Course Builder', icon: <AutoStoriesIcon />, view: 'courses' },
+          { text: 'Quiz Authoring', icon: <QuizIcon />, view: 'quizzes' },
+          { text: 'Grading Center', icon: <GradeIcon />, view: 'users' },
+          { text: 'Announcements', icon: <CampaignIcon />, view: 'announcements' },
         ];
       case 'STUDENT':
       default:
         return [
-          { text: 'My Learning', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'Course Catalog', icon: <AutoStoriesIcon />, path: '/dashboard' },
-          { text: 'Quizzes & Tests', icon: <QuizIcon />, path: '/dashboard' },
-          { text: 'Announcements', icon: <CampaignIcon />, path: '/dashboard' },
-          { text: 'My Progress', icon: <InsightsIcon />, path: '/dashboard' },
+          { text: 'My Learning', icon: <DashboardIcon />, view: 'overview' },
+          { text: 'Course Catalog', icon: <AutoStoriesIcon />, view: 'courses' },
+          { text: 'Quizzes & Tests', icon: <QuizIcon />, view: 'quizzes' },
+          { text: 'Announcements', icon: <CampaignIcon />, view: 'announcements' },
+          { text: 'My Progress', icon: <InsightsIcon />, view: 'telemetry' },
         ];
     }
   };
@@ -148,15 +186,12 @@ export const DashboardLayout: React.FC = () => {
       {/* Nav List */}
       <List sx={{ px: 1.5, py: 2, flexGrow: 1 }}>
         {navItems.map((item) => {
-          const isSelected = location.pathname === item.path;
+          const isSelected = currentView === item.view;
           return (
             <ListItem key={item.text} disablePadding sx={{ mb: 0.8 }}>
               <ListItemButton
                 selected={isSelected}
-                onClick={() => {
-                  navigate(item.path);
-                  if (isMobile) setMobileOpen(false);
-                }}
+                onClick={() => handleSelectView(item.view)}
                 sx={{
                   borderRadius: 2,
                   '&.Mui-selected': {
@@ -246,19 +281,71 @@ export const DashboardLayout: React.FC = () => {
 
           <Stack direction="row" spacing={1.5} alignItems="center">
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
-              {user?.role === 'SUPER_ADMIN' && 'Platform Control Center'}
-              {user?.role === 'TENANT_ADMIN' && `${tenant?.name || 'Tenant'} Administration`}
-              {user?.role === 'INSTRUCTOR' && 'Instructor Portal'}
-              {user?.role === 'STUDENT' && 'Student Learning Center'}
+              {currentView === 'overview' && 'Dashboard Overview'}
+              {currentView === 'users' && 'User Directory & Roster'}
+              {currentView === 'courses' && 'Courses & Curriculum'}
+              {currentView === 'quizzes' && 'Quizzes & Assessments'}
+              {currentView === 'announcements' && 'Campus Announcements'}
+              {currentView === 'tenants' && 'Tenants Directory'}
+              {currentView === 'telemetry' && 'System Telemetry'}
+              {currentView === 'settings' && 'Platform Settings'}
             </Typography>
           </Stack>
 
           <Stack direction="row" spacing={2} alignItems="center">
-            <IconButton color="inherit" size="small">
-              <Badge badgeContent={3} color="error">
+            <IconButton
+              color="inherit"
+              size="small"
+              onClick={(e) => setNotificationsAnchor(e.currentTarget)}
+            >
+              <Badge badgeContent={unreadCount} color="error">
                 <NotificationsIcon />
               </Badge>
             </IconButton>
+
+            {/* Notifications Popover Menu */}
+            <Popover
+              open={Boolean(notificationsAnchor)}
+              anchorEl={notificationsAnchor}
+              onClose={() => setNotificationsAnchor(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              PaperProps={{ sx: { width: 340, p: 2, borderRadius: 2 } }}
+            >
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                  Notifications ({unreadCount})
+                </Typography>
+                <Button size="small" onClick={handleMarkAllRead} sx={{ fontSize: '0.75rem' }}>
+                  Mark all as read
+                </Button>
+              </Stack>
+              <Divider sx={{ mb: 1 }} />
+              {notifications.map((n) => (
+                <MenuItem
+                  key={n.id}
+                  onClick={() => setNotificationsAnchor(null)}
+                  sx={{
+                    borderRadius: 1.5,
+                    mb: 1,
+                    p: 1.2,
+                    bgcolor: n.read ? 'transparent' : 'rgba(37, 99, 235, 0.05)',
+                  }}
+                >
+                  <Stack spacing={0.5} sx={{ width: '100%' }}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      {!n.read && <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main' }} />}
+                      <Typography variant="body2" sx={{ fontWeight: n.read ? 500 : 700 }}>
+                        {n.title}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', pl: n.read ? 0 : 2 }}>
+                      {n.time}
+                    </Typography>
+                  </Stack>
+                </MenuItem>
+              ))}
+            </Popover>
 
             <Divider orientation="vertical" flexItem sx={{ height: 24, alignSelf: 'center' }} />
 
