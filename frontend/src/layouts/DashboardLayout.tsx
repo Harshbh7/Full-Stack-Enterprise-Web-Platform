@@ -64,7 +64,11 @@ export const DashboardLayout: React.FC = () => {
     };
     updatePending();
     window.addEventListener(USERS_CHANGED_EVENT, updatePending);
-    return () => window.removeEventListener(USERS_CHANGED_EVENT, updatePending);
+    window.addEventListener('storage', updatePending);
+    return () => {
+      window.removeEventListener(USERS_CHANGED_EVENT, updatePending);
+      window.removeEventListener('storage', updatePending);
+    };
   }, [user]);
 
   const [mobileOpen, setMobileOpen] = useState(false);

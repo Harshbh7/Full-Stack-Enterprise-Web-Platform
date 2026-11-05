@@ -53,6 +53,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import SpeedIcon from '@mui/icons-material/Speed';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import { useAppSelector } from '../store/index.js';
 import { api } from '../services/api.js';
 import {
@@ -68,6 +69,10 @@ import {
   removeStoredUser,
   updateStoredUserStatus,
   getPendingVerificationsForRole,
+  getOtherTenantPendingVerifications,
+  reassignTenantAndApprove,
+  getAllStoredUsers,
+  saveAllStoredUsers,
   approveVerificationRequest,
   rejectVerificationRequest,
   USERS_CHANGED_EVENT,
@@ -216,13 +221,97 @@ export const DashboardPage: React.FC = () => {
     getPendingVerificationsForRole(user?.role || '', activeTenantSlug)
   );
 
+  // Other pending users in system (e.g. if applicant selected another campus by accident)
+  const [otherPendingUsers, setOtherPendingUsers] = useState<StoredUser[]>(() =>
+    getOtherTenantPendingVerifications(activeTenantSlug)
+  );
+
+  // Filter tab for pending verifications ('ALL' | 'INSTRUCTOR' | 'STUDENT')
+  const [pendingRoleFilter, setPendingRoleFilter] = useState<'ALL' | 'INSTRUCTOR' | 'STUDENT'>('ALL');
+
+  const fetchAndSyncPending = async () => {
+    // 1. Update from local storage
+    const local = getPendingVerificationsForRole(user?.role || '', activeTenantSlug);
+    setPendingVerifications(local);
+    setOtherPendingUsers(getOtherTenantPendingVerifications(activeTenantSlug));
+
+    // 2. Fetch from backend /users/pending to ensure cross-browser/cross-client sync
+    try {
+      const res = await api.get('/users/pending');
+      if (res.data?.data && Array.isArray(res.data.data)) {
+        interface BackendPendingUser {
+          id?: string;
+          _id?: string;
+          firstName?: string;
+          lastName?: string;
+          email: string;
+          role: string;
+          requestedRole?: string;
+          status: string;
+          verifierRole?: string;
+          createdAt?: string;
+          tenantId?: { _id?: string; id?: string; slug?: string; name?: string } | string;
+        }
+
+        const currentUsers = getAllStoredUsers();
+        let updated = false;
+        const list = [...currentUsers];
+
+        for (const item of res.data.data as BackendPendingUser[]) {
+          const tenantSlugFromItem =
+            typeof item.tenantId === 'object' && item.tenantId?.slug
+              ? item.tenantId.slug
+              : activeTenantSlug;
+
+          const existingIndex = list.findIndex(
+            (u) => u.email.toLowerCase() === item.email.toLowerCase()
+          );
+
+          const backendMapped: StoredUser = {
+            id: item.id || item._id || `usr-sso-${Date.now().toString(36)}`,
+            name: `${item.firstName || ''} ${item.lastName || ''}`.trim() || item.email,
+            firstName: item.firstName,
+            lastName: item.lastName,
+            email: item.email.toLowerCase().trim(),
+            role: (item.requestedRole || item.role) as any,
+            requestedRole: (item.requestedRole || item.role) as any,
+            status: 'PENDING_VERIFICATION',
+            tenantSlug: tenantSlugFromItem,
+            verifierRole: item.verifierRole as any,
+            requestedAt: item.createdAt || new Date().toISOString(),
+          };
+
+          if (existingIndex === -1) {
+            list.unshift(backendMapped);
+            updated = true;
+          } else if (list[existingIndex].status !== 'PENDING_VERIFICATION') {
+            list[existingIndex] = {
+              ...list[existingIndex],
+              status: 'PENDING_VERIFICATION',
+              requestedRole: (item.requestedRole || item.role) as any,
+            };
+            updated = true;
+          }
+        }
+
+        if (updated) {
+          saveAllStoredUsers(list);
+        }
+        setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+        setOtherPendingUsers(getOtherTenantPendingVerifications(activeTenantSlug));
+      }
+    } catch {
+      // client-side storage active
+    }
+  };
+
   // Sync users, courses, announcements, and verifications on tenant change or storage update
   useEffect(() => {
     const handleDataSync = () => {
       setUserList(getStoredUsersForTenant(activeTenantSlug));
       setCourseList(getStoredCoursesForTenant(activeTenantSlug));
       setAnnouncementList(getStoredAnnouncementsForTenant(activeTenantSlug));
-      setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+      fetchAndSyncPending();
     };
 
     window.addEventListener(USERS_CHANGED_EVENT, handleDataSync);
@@ -232,7 +321,7 @@ export const DashboardPage: React.FC = () => {
     setUserList(getStoredUsersForTenant(activeTenantSlug));
     setCourseList(getStoredCoursesForTenant(activeTenantSlug));
     setAnnouncementList(getStoredAnnouncementsForTenant(activeTenantSlug));
-    setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+    fetchAndSyncPending();
 
     return () => {
       window.removeEventListener(USERS_CHANGED_EVENT, handleDataSync);
@@ -250,9 +339,26 @@ export const DashboardPage: React.FC = () => {
     const verifierName = `${user?.firstName || 'Admin'} ${user?.lastName || ''}`.trim();
     approveVerificationRequest(targetUser.email, verifierName);
     setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+    setOtherPendingUsers(getOtherTenantPendingVerifications(activeTenantSlug));
     setUserList(getStoredUsersForTenant(activeTenantSlug));
     setSuccessMessage(
       `✓ Successfully approved ${targetUser.name} (${targetUser.email}) as ${targetUser.requestedRole || targetUser.role}! Account is now ACTIVE.`
+    );
+  };
+
+  const handleClaimAndApprove = async (targetUser: StoredUser) => {
+    try {
+      await api.post(`/users/${targetUser.id || targetUser.email}/approve`);
+    } catch {
+      // client fallback
+    }
+    const verifierName = `${user?.firstName || 'Admin'} ${user?.lastName || ''}`.trim();
+    reassignTenantAndApprove(targetUser.email, activeTenantSlug, verifierName);
+    setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+    setOtherPendingUsers(getOtherTenantPendingVerifications(activeTenantSlug));
+    setUserList(getStoredUsersForTenant(activeTenantSlug));
+    setSuccessMessage(
+      `✓ Successfully associated ${targetUser.name} (${targetUser.email}) with ${tenantDisplayName} and approved account as ACTIVE!`
     );
   };
 
@@ -265,6 +371,7 @@ export const DashboardPage: React.FC = () => {
     const verifierName = `${user?.firstName || 'Admin'} ${user?.lastName || ''}`.trim();
     rejectVerificationRequest(targetUser.email, verifierName);
     setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+    setOtherPendingUsers(getOtherTenantPendingVerifications(activeTenantSlug));
     setUserList(getStoredUsersForTenant(activeTenantSlug));
     setSuccessMessage(`Access request for ${targetUser.name} (${targetUser.email}) has been rejected.`);
   };
@@ -783,156 +890,264 @@ export const DashboardPage: React.FC = () => {
           </Grid>
 
           {/* ================= PENDING ROLE VERIFICATIONS QUEUE ================= */}
-          {(user?.role === 'SUPER_ADMIN' || user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR') && (
-            <Paper
-              sx={{
-                p: 3,
-                borderRadius: 2.5,
-                mb: 4,
-                border: '1px solid',
-                borderColor: pendingVerifications.length > 0 ? 'warning.main' : 'divider',
-                bgcolor: pendingVerifications.length > 0 ? 'rgba(237, 108, 2, 0.03)' : 'background.paper',
-                boxShadow: pendingVerifications.length > 0 ? '0 4px 20px rgba(237, 108, 2, 0.08)' : 'none',
-              }}
-            >
-              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 2 }}>
-                <Box>
-                  <Stack direction="row" spacing={1.5} alignItems="center">
-                    <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                      Pending Role Verifications & Approval Queue
+          {(user?.role === 'SUPER_ADMIN' || user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR') && (() => {
+            const instructorsCount = pendingVerifications.filter(
+              (u) => (u.requestedRole || u.role) === 'INSTRUCTOR'
+            ).length;
+
+            const studentsCount = pendingVerifications.filter(
+              (u) => (u.requestedRole || u.role) === 'STUDENT'
+            ).length;
+
+            const displayedPending = pendingVerifications.filter((item) => {
+              const r = item.requestedRole || item.role;
+              if (pendingRoleFilter === 'INSTRUCTOR') return r === 'INSTRUCTOR';
+              if (pendingRoleFilter === 'STUDENT') return r === 'STUDENT';
+              return true;
+            });
+
+            return (
+              <Paper
+                sx={{
+                  p: 3,
+                  borderRadius: 2.5,
+                  mb: 4,
+                  border: '1px solid',
+                  borderColor: pendingVerifications.length > 0 ? 'warning.main' : 'divider',
+                  bgcolor: pendingVerifications.length > 0 ? 'rgba(237, 108, 2, 0.03)' : 'background.paper',
+                  boxShadow: pendingVerifications.length > 0 ? '0 4px 20px rgba(237, 108, 2, 0.08)' : 'none',
+                }}
+              >
+                <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 2 }}>
+                  <Box>
+                    <Stack direction="row" spacing={1.5} alignItems="center">
+                      <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                        Pending Role Verifications & Approval Queue
+                      </Typography>
+                      {pendingVerifications.length > 0 ? (
+                        <Chip
+                          label={`${pendingVerifications.length} Awaiting Authorization`}
+                          color="warning"
+                          size="small"
+                          sx={{ fontWeight: 800, fontSize: '0.72rem' }}
+                        />
+                      ) : (
+                        <Chip
+                          label="Roster Verified"
+                          color="success"
+                          variant="outlined"
+                          size="small"
+                          sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+                        />
+                      )}
+                    </Stack>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                      {user?.role === 'SUPER_ADMIN' && 'Hierarchical Verification Tier 1: Authorize new College Administrators before institutional deployment.'}
+                      {user?.role === 'TENANT_ADMIN' && `Hierarchical Verification Tier 2: Authorize Faculty Instructors & Student Enrollees for ${tenantDisplayName}.`}
+                      {user?.role === 'INSTRUCTOR' && `Hierarchical Verification Tier 3: Authorize Student Enrollees for ${tenantDisplayName}.`}
                     </Typography>
-                    {pendingVerifications.length > 0 ? (
-                      <Chip
-                        label={`${pendingVerifications.length} Awaiting Authorization`}
-                        color="warning"
-                        size="small"
-                        sx={{ fontWeight: 800, fontSize: '0.72rem' }}
-                      />
-                    ) : (
-                      <Chip
-                        label="Roster Verified"
-                        color="success"
-                        variant="outlined"
-                        size="small"
-                        sx={{ fontWeight: 700, fontSize: '0.72rem' }}
-                      />
+
+                    {/* Role Filter Chips for College Admin */}
+                    {user?.role === 'TENANT_ADMIN' && pendingVerifications.length > 0 && (
+                      <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                        <Chip
+                          label={`All (${pendingVerifications.length})`}
+                          size="small"
+                          clickable
+                          onClick={() => setPendingRoleFilter('ALL')}
+                          color={pendingRoleFilter === 'ALL' ? 'primary' : 'default'}
+                          variant={pendingRoleFilter === 'ALL' ? 'filled' : 'outlined'}
+                          sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+                        />
+                        <Chip
+                          label={`Faculty Instructors (${instructorsCount})`}
+                          size="small"
+                          clickable
+                          onClick={() => setPendingRoleFilter('INSTRUCTOR')}
+                          color={pendingRoleFilter === 'INSTRUCTOR' ? 'primary' : 'default'}
+                          variant={pendingRoleFilter === 'INSTRUCTOR' ? 'filled' : 'outlined'}
+                          sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+                        />
+                        <Chip
+                          label={`Students (${studentsCount})`}
+                          size="small"
+                          clickable
+                          onClick={() => setPendingRoleFilter('STUDENT')}
+                          color={pendingRoleFilter === 'STUDENT' ? 'primary' : 'default'}
+                          variant={pendingRoleFilter === 'STUDENT' ? 'filled' : 'outlined'}
+                          sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+                        />
+                      </Stack>
                     )}
-                  </Stack>
-                  <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-                    {user?.role === 'SUPER_ADMIN' && 'Hierarchical Verification Tier 1: Authorize new College Administrators before institutional deployment.'}
-                    {user?.role === 'TENANT_ADMIN' && `Hierarchical Verification Tier 2: Authorize Faculty Instructors for ${tenantDisplayName}.`}
-                    {user?.role === 'INSTRUCTOR' && `Hierarchical Verification Tier 3: Authorize Student Enrollees for ${tenantDisplayName}.`}
-                  </Typography>
-                </Box>
+                  </Box>
 
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={() => {
-                    const fresh = getPendingVerificationsForRole(user?.role || '', activeTenantSlug);
-                    setPendingVerifications(fresh);
-                  }}
-                  sx={{ textTransform: 'none', fontWeight: 600 }}
-                >
-                  Refresh Queue
-                </Button>
-              </Stack>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<RefreshIcon />}
+                    onClick={async () => {
+                      await fetchAndSyncPending();
+                      setSuccessMessage('✓ Verification queue refreshed.');
+                    }}
+                    sx={{ textTransform: 'none', fontWeight: 600 }}
+                  >
+                    Refresh Queue
+                  </Button>
+                </Stack>
 
-              {pendingVerifications.length === 0 ? (
-                <Box
-                  sx={{
-                    p: 2.5,
-                    bgcolor: 'background.surface',
-                    borderRadius: 2,
-                    border: '1px dashed',
-                    borderColor: 'divider',
-                    textAlign: 'center',
-                  }}
-                >
-                  <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                    ✓ All accounts under your authority are active and verified.
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: 'text.disabled', mt: 0.5, display: 'block' }}>
-                    {user?.role === 'SUPER_ADMIN' && 'New College Admins will appear here for cryptographic sign-off upon registration.'}
-                    {user?.role === 'TENANT_ADMIN' && 'New Teachers / Instructors will appear here for verification upon registration.'}
-                    {user?.role === 'INSTRUCTOR' && 'New Students enrolling in your courses will appear here for verification.'}
-                  </Typography>
-                </Box>
-              ) : (
-                <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
-                  <Table size="small">
-                    <TableHead sx={{ bgcolor: 'background.surface' }}>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Applicant</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Email Address</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Institution Campus</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Role Requested</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }} align="right">Verification Decision</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {pendingVerifications.map((item) => (
-                        <TableRow key={item.id} hover>
-                          <TableCell sx={{ fontWeight: 700 }}>{item.name}</TableCell>
-                          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.email}</TableCell>
-                          <TableCell>
-                            {tenantsList.find((t) => t.slug === item.tenantSlug)?.name || item.tenantSlug}
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={item.requestedRole || item.role}
-                              size="small"
-                              sx={{ fontWeight: 800, fontSize: '0.7rem' }}
-                              color={
-                                (item.requestedRole || item.role) === 'TENANT_ADMIN'
-                                  ? 'primary'
-                                  : (item.requestedRole || item.role) === 'INSTRUCTOR'
-                                  ? 'secondary'
-                                  : 'default'
-                              }
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label="PENDING APPROVAL"
-                              size="small"
-                              color="warning"
-                              sx={{ fontWeight: 800, fontSize: '0.68rem' }}
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Stack direction="row" spacing={1} justifyContent="flex-end">
-                              <Button
-                                size="small"
-                                variant="contained"
-                                color="success"
-                                startIcon={<CheckCircleOutlineIcon />}
-                                onClick={() => handleApproveVerification(item)}
-                                sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.5 }}
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="error"
-                                onClick={() => handleRejectVerification(item)}
-                                sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.5 }}
-                              >
-                                Reject
-                              </Button>
-                            </Stack>
-                          </TableCell>
+                {displayedPending.length === 0 ? (
+                  <Box
+                    sx={{
+                      p: 2.5,
+                      bgcolor: 'background.surface',
+                      borderRadius: 2,
+                      border: '1px dashed',
+                      borderColor: 'divider',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                      ✓ All accounts under your authority are active and verified.
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.disabled', mt: 0.5, display: 'block' }}>
+                      {user?.role === 'SUPER_ADMIN' && 'New College Admins will appear here for cryptographic sign-off upon registration.'}
+                      {user?.role === 'TENANT_ADMIN' && 'New Faculty Instructors and Students will appear here for verification upon registration.'}
+                      {user?.role === 'INSTRUCTOR' && 'New Students enrolling in your courses will appear here for verification.'}
+                    </Typography>
+                  </Box>
+                ) : (
+                  <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                    <Table size="small">
+                      <TableHead sx={{ bgcolor: 'background.surface' }}>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 700 }}>Applicant</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Email Address</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Institution Campus</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Role Requested</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }} align="right">Verification Decision</TableCell>
                         </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {displayedPending.map((item) => (
+                          <TableRow key={item.id} hover>
+                            <TableCell sx={{ fontWeight: 700 }}>{item.name}</TableCell>
+                            <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.email}</TableCell>
+                            <TableCell>
+                              {tenantsList.find((t) => t.slug === item.tenantSlug)?.name || item.tenantSlug}
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={item.requestedRole || item.role}
+                                size="small"
+                                sx={{ fontWeight: 800, fontSize: '0.7rem' }}
+                                color={
+                                  (item.requestedRole || item.role) === 'TENANT_ADMIN'
+                                    ? 'primary'
+                                    : (item.requestedRole || item.role) === 'INSTRUCTOR'
+                                    ? 'secondary'
+                                    : 'info'
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label="PENDING APPROVAL"
+                                size="small"
+                                color="warning"
+                                sx={{ fontWeight: 800, fontSize: '0.68rem' }}
+                              />
+                            </TableCell>
+                            <TableCell align="right">
+                              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  color="success"
+                                  startIcon={<CheckCircleOutlineIcon />}
+                                  onClick={() => handleApproveVerification(item)}
+                                  sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.5 }}
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="error"
+                                  onClick={() => handleRejectVerification(item)}
+                                  sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.5 }}
+                                >
+                                  Reject
+                                </Button>
+                              </Stack>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+
+                {/* Cross-Campus Notice: When applicants registered under other institutions */}
+                {otherPendingUsers.length > 0 && (user?.role === 'TENANT_ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                  <Alert
+                    severity="info"
+                    icon={<ShieldOutlinedIcon fontSize="inherit" />}
+                    sx={{ mt: 2.5, borderRadius: 2 }}
+                  >
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                      {otherPendingUsers.length} Pending Applicant{otherPendingUsers.length > 1 ? 's' : ''} Registered Under Other Institutions
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+                      If any of these applicants intended to register for {tenantDisplayName}, you can verify and associate them directly:
+                    </Typography>
+                    <Stack spacing={1}>
+                      {otherPendingUsers.map((op) => (
+                        <Stack
+                          key={op.email}
+                          direction={{ xs: 'column', sm: 'row' }}
+                          justifyContent="space-between"
+                          alignItems={{ xs: 'flex-start', sm: 'center' }}
+                          spacing={1}
+                          sx={{
+                            bgcolor: 'background.paper',
+                            p: 1.2,
+                            px: 1.8,
+                            borderRadius: 1.5,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                          }}
+                        >
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              {op.name}{' '}
+                              <Typography component="span" variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                                ({op.email})
+                              </Typography>
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              Role: <strong>{op.requestedRole || op.role}</strong> • Selected Campus:{' '}
+                              <strong>{tenantsList.find((t) => t.slug === op.tenantSlug)?.name || op.tenantSlug}</strong>
+                            </Typography>
+                          </Box>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="primary"
+                            startIcon={<CheckCircleOutlineIcon />}
+                            onClick={() => handleClaimAndApprove(op)}
+                            sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                          >
+                            Claim & Approve for {tenantDisplayName}
+                          </Button>
+                        </Stack>
                       ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </Paper>
-          )}
+                    </Stack>
+                  </Alert>
+                )}
+              </Paper>
+            );
+          })()}
 
           {/* Interactive Action Bar */}
           <Paper sx={{ p: 3, borderRadius: 2, mb: 4 }}>

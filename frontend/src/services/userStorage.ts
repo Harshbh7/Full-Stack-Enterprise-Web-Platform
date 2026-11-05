@@ -132,6 +132,30 @@ export const DEFAULT_USERS: StoredUser[] = [
 const USER_STORAGE_KEY = 'edusphere_users';
 export const USERS_CHANGED_EVENT = 'edusphere_users_changed';
 
+let broadcastChannel: BroadcastChannel | null = null;
+if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+  try {
+    broadcastChannel = new BroadcastChannel('edusphere_users_sync_channel');
+    broadcastChannel.onmessage = (event) => {
+      if (event.data?.type === 'USERS_UPDATED' && Array.isArray(event.data.users)) {
+        window.dispatchEvent(new CustomEvent(USERS_CHANGED_EVENT, { detail: event.data.users }));
+      }
+    };
+  } catch {
+    // fallback if unsupported
+  }
+}
+
+export function normalizeTenantSlug(raw?: string): string {
+  if (!raw) return '';
+  const val = raw.toLowerCase().trim();
+  if (val === 'lpu' || val === 'tenant-lpu' || val.includes('lovely')) return 'lpu';
+  if (val === 'apex-uni' || val === 'tenant-1' || val.includes('apex')) return 'apex-uni';
+  if (val === 'oakridge-col' || val === 'tenant-2' || val.includes('oakridge')) return 'oakridge-col';
+  if (val === 'summit-inst' || val === 'tenant-3' || val.includes('summit')) return 'summit-inst';
+  return val;
+}
+
 export function getAllStoredUsers(): StoredUser[] {
   if (typeof window === 'undefined') return DEFAULT_USERS;
   try {
@@ -158,13 +182,14 @@ export function getStoredUsersForTenant(tenantSlug?: string): StoredUser[] {
   if (!tenantSlug || tenantSlug === 'global') {
     return all;
   }
-  const filtered = all.filter((u) => u.tenantSlug === tenantSlug);
+  const targetNorm = normalizeTenantSlug(tenantSlug);
+  const filtered = all.filter((u) => normalizeTenantSlug(u.tenantSlug) === targetNorm);
   if (filtered.length > 0) {
     return filtered;
   }
   // If no users exist yet for this tenant in storage, check if this tenant has an admin in stored tenants
   const storedTenants = getStoredTenants();
-  const matched = storedTenants.find((t) => t.slug === tenantSlug);
+  const matched = storedTenants.find((t) => normalizeTenantSlug(t.slug) === targetNorm);
   if (matched) {
     const adminUser: StoredUser = {
       id: `usr-${matched.slug}-admin`,
@@ -188,6 +213,7 @@ export function saveAllStoredUsers(users: StoredUser[]): void {
   try {
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(users));
     window.dispatchEvent(new CustomEvent(USERS_CHANGED_EVENT, { detail: users }));
+    broadcastChannel?.postMessage({ type: 'USERS_UPDATED', users });
   } catch (err) {
     console.error('Failed to save users to localStorage', err);
   }
@@ -233,6 +259,8 @@ export function requestGoogleRegistration(data: {
   const firstName = parts[0] || 'User';
   const lastName = parts.slice(1).join(' ') || '';
 
+  const cleanSlug = normalizeTenantSlug(data.tenantSlug) || 'lpu';
+
   const newUser: StoredUser = {
     id: `usr-sso-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
     name: data.name.trim(),
@@ -242,7 +270,7 @@ export function requestGoogleRegistration(data: {
     role: data.role,
     requestedRole: data.role,
     status: 'PENDING_VERIFICATION',
-    tenantSlug: data.tenantSlug,
+    tenantSlug: cleanSlug,
     authProvider: data.authProvider || 'GOOGLE',
     requestedAt: new Date().toISOString(),
     verifierRole,
@@ -257,35 +285,87 @@ export function getPendingVerificationsForRole(
   tenantSlug?: string
 ): StoredUser[] {
   const all = getAllStoredUsers();
+  const normalizedSlug = normalizeTenantSlug(tenantSlug);
 
   if (currentRole === 'SUPER_ADMIN') {
-    // Superadmin verifies all Tenant Admins
+    // Superadmin verifies all Tenant Admins across all institutions
     return all.filter(
-      (u) => u.status === 'PENDING_VERIFICATION' && (u.requestedRole === 'TENANT_ADMIN' || u.role === 'TENANT_ADMIN')
+      (u) =>
+        u.status === 'PENDING_VERIFICATION' &&
+        (u.requestedRole === 'TENANT_ADMIN' || u.role === 'TENANT_ADMIN')
     );
   }
 
   if (currentRole === 'TENANT_ADMIN') {
-    // College Admin verifies Teachers/Instructors for their own college
-    return all.filter(
-      (u) =>
-        u.status === 'PENDING_VERIFICATION' &&
-        (u.requestedRole === 'INSTRUCTOR' || u.role === 'INSTRUCTOR') &&
-        u.tenantSlug === tenantSlug
-    );
+    // College Admin verifies Teachers/Instructors AND Students for their institution
+    return all.filter((u) => {
+      if (u.status !== 'PENDING_VERIFICATION') return false;
+      const targetRole = u.requestedRole || u.role;
+      const isCampusRole = targetRole === 'INSTRUCTOR' || targetRole === 'STUDENT';
+      if (!isCampusRole) return false;
+      if (!normalizedSlug || normalizedSlug === 'global') return true;
+      return normalizeTenantSlug(u.tenantSlug) === normalizedSlug;
+    });
   }
 
   if (currentRole === 'INSTRUCTOR') {
     // Teachers verify Students for their college
-    return all.filter(
-      (u) =>
-        u.status === 'PENDING_VERIFICATION' &&
-        (u.requestedRole === 'STUDENT' || u.role === 'STUDENT') &&
-        u.tenantSlug === tenantSlug
-    );
+    return all.filter((u) => {
+      if (u.status !== 'PENDING_VERIFICATION') return false;
+      const targetRole = u.requestedRole || u.role;
+      if (targetRole !== 'STUDENT') return false;
+      if (!normalizedSlug || normalizedSlug === 'global') return true;
+      return normalizeTenantSlug(u.tenantSlug) === normalizedSlug;
+    });
   }
 
   return [];
+}
+
+/**
+ * Returns any pending verifications that are NOT currently scoped to the active tenant.
+ * Helpful for administrators to detect if an applicant accidentally selected another campus.
+ */
+export function getOtherTenantPendingVerifications(activeTenantSlug?: string): StoredUser[] {
+  const all = getAllStoredUsers();
+  const normalizedActive = normalizeTenantSlug(activeTenantSlug);
+  return all.filter((u) => {
+    if (u.status !== 'PENDING_VERIFICATION') return false;
+    const targetRole = u.requestedRole || u.role;
+    if (targetRole === 'SUPER_ADMIN') return false;
+    const userTenant = normalizeTenantSlug(u.tenantSlug);
+    return userTenant !== normalizedActive;
+  });
+}
+
+/**
+ * Reassigns an applicant to the administrator's campus and approves them immediately.
+ */
+export function reassignTenantAndApprove(
+  email: string,
+  targetTenantSlug: string,
+  verifierName: string
+): boolean {
+  const all = getAllStoredUsers();
+  const target = all.find((u) => u.email.toLowerCase() === email.toLowerCase());
+  if (!target) return false;
+
+  const updated = all.map((u) => {
+    if (u.email.toLowerCase() === email.toLowerCase()) {
+      return {
+        ...u,
+        status: 'ACTIVE' as VerificationStatus,
+        tenantSlug: normalizeTenantSlug(targetTenantSlug),
+        role: u.requestedRole || u.role,
+        verifierName,
+        verifiedAt: new Date().toISOString(),
+      };
+    }
+    return u;
+  });
+
+  saveAllStoredUsers(updated);
+  return true;
 }
 
 export function approveVerificationRequest(email: string, verifierName: string): boolean {

@@ -456,11 +456,13 @@ export const LoginPage: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
+    const targetTenant = onboardingTenant || (tenantSlug !== 'global' ? tenantSlug : 'lpu');
+
     const newUser = requestGoogleRegistration({
       name: onboardingName.trim(),
       email: onboardingEmail.toLowerCase().trim(),
       role: onboardingRole,
-      tenantSlug: onboardingTenant,
+      tenantSlug: targetTenant,
       authProvider: 'GOOGLE',
     });
 
@@ -468,7 +470,7 @@ export const LoginPage: React.FC = () => {
       await api.post('/auth/sso/google', {
         email: onboardingEmail.toLowerCase().trim(),
         name: onboardingName.trim(),
-        tenantSlug: onboardingTenant,
+        tenantSlug: targetTenant,
         requestedRole: onboardingRole,
       });
     } catch {
@@ -565,6 +567,10 @@ export const LoginPage: React.FC = () => {
   };
 
   const handleGoogleBtnClick = () => {
+    setGoogleLoginError(null);
+    if (tenantSlug && tenantSlug !== 'global') {
+      setOnboardingTenant(tenantSlug);
+    }
     if (email && email.includes('@')) {
       const userParts = email.split('@')[0].split('.');
       const guessedName = userParts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
@@ -857,7 +863,13 @@ export const LoginPage: React.FC = () => {
                     select
                     label="Tenant Organization"
                     value={tenantSlug}
-                    onChange={(e) => setTenantSlug(e.target.value)}
+                    onChange={(e) => {
+                      const nextSlug = e.target.value;
+                      setTenantSlug(nextSlug);
+                      if (nextSlug && nextSlug !== 'global') {
+                        setOnboardingTenant(nextSlug);
+                      }
+                    }}
                     fullWidth
                     size="medium"
                     disabled={isLoading}
@@ -1062,6 +1074,9 @@ export const LoginPage: React.FC = () => {
                   setGoogleStep('choose_account');
                 } else {
                   setOnboardingEmail(email || '');
+                  if (tenantSlug && tenantSlug !== 'global') {
+                    setOnboardingTenant(tenantSlug);
+                  }
                   setGoogleStep('onboarding');
                 }
               }}
@@ -1177,7 +1192,20 @@ export const LoginPage: React.FC = () => {
                   label="Google Workspace Email"
                   size="small"
                   value={onboardingEmail}
-                  onChange={(e) => setOnboardingEmail(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setOnboardingEmail(val);
+                    const lower = val.toLowerCase().trim();
+                    if (lower.includes('lpu.edu') || lower.includes('@lpu') || lower.includes('lpu.in')) {
+                      setOnboardingTenant('lpu');
+                    } else if (lower.includes('apex.edu') || lower.includes('@apex')) {
+                      setOnboardingTenant('apex-uni');
+                    } else if (lower.includes('oakridge.edu') || lower.includes('@oakridge')) {
+                      setOnboardingTenant('oakridge-col');
+                    } else if (lower.includes('summit.edu') || lower.includes('@summit')) {
+                      setOnboardingTenant('summit-inst');
+                    }
+                  }}
                   fullWidth
                   required
                   helperText="Your authenticated institutional Google account"

@@ -179,12 +179,17 @@ export class UserService {
     }
 
     if (currentUser.role === 'TENANT_ADMIN') {
-      // College Admin reviews pending Instructors for their college
+      // College Admin reviews pending Instructors and Students for their college
       if (!currentUser.tenantId) return [];
       return User.find({
         tenantId: currentUser.tenantId,
         status: 'PENDING_VERIFICATION',
-        $or: [{ requestedRole: 'INSTRUCTOR' }, { verifierRole: 'TENANT_ADMIN' }],
+        $or: [
+          { requestedRole: 'INSTRUCTOR' },
+          { verifierRole: 'TENANT_ADMIN' },
+          { requestedRole: 'STUDENT' },
+          { verifierRole: 'INSTRUCTOR' },
+        ],
       })
         .populate('tenantId', 'name slug domain')
         .sort({ createdAt: -1 })
