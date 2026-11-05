@@ -1,12 +1,10 @@
 import http from 'http';
-import { Server as SocketIOServer } from 'socket.io';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDatabase } from './config/db.js';
 import { redis } from './config/redis.js';
 import { logger } from './config/logger.js';
-
-import { isOriginAllowed } from './config/cors.js';
+import { initSocketServer } from './sockets/socket.server.js';
 
 const startServer = async () => {
   // Connect to persistent MongoDB
@@ -15,28 +13,8 @@ const startServer = async () => {
   const app = createApp();
   const httpServer = http.createServer(app);
 
-  // Setup Socket.IO Server with Dynamic CORS
-  const io = new SocketIOServer(httpServer, {
-    cors: {
-      origin: (origin, callback) => {
-        if (isOriginAllowed(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error('Origin not allowed by Socket.IO CORS'));
-        }
-      },
-      credentials: true,
-      methods: ['GET', 'POST'],
-    },
-  });
-
-  io.on('connection', (socket) => {
-    logger.info(`WebSocket client connected: ${socket.id}`);
-
-    socket.on('disconnect', () => {
-      logger.info(`WebSocket client disconnected: ${socket.id}`);
-    });
-  });
+  // Initialize authenticated Socket.IO Server with isolated tenant rooms
+  initSocketServer(httpServer);
 
   const server = httpServer.listen(env.PORT, () => {
     logger.info(`🚀 EduSphere Backend Server running on port ${env.PORT} [${env.NODE_ENV}]`);

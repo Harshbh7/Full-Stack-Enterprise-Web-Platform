@@ -10,7 +10,9 @@ export interface IUser extends Document {
   lastName: string;
   avatarUrl?: string;
   role: UserRole;
-  status: 'ACTIVE' | 'PENDING_VERIFICATION' | 'INACTIVE' | 'SUSPENDED';
+  requestedRole?: UserRole;
+  verifierRole?: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'INSTRUCTOR';
+  status: 'ACTIVE' | 'PENDING_VERIFICATION' | 'REJECTED' | 'INACTIVE' | 'SUSPENDED';
   authProvider: 'LOCAL' | 'GOOGLE' | 'GITHUB';
   providerId?: string;
   lastLoginAt?: Date;
@@ -32,9 +34,17 @@ const UserSchema = new Schema<IUser>(
       required: true,
       index: true,
     },
+    requestedRole: {
+      type: String,
+      enum: ['SUPER_ADMIN', 'TENANT_ADMIN', 'INSTRUCTOR', 'STUDENT'],
+    },
+    verifierRole: {
+      type: String,
+      enum: ['SUPER_ADMIN', 'TENANT_ADMIN', 'INSTRUCTOR'],
+    },
     status: {
       type: String,
-      enum: ['ACTIVE', 'PENDING_VERIFICATION', 'INACTIVE', 'SUSPENDED'],
+      enum: ['ACTIVE', 'PENDING_VERIFICATION', 'REJECTED', 'INACTIVE', 'SUSPENDED'],
       default: 'ACTIVE',
       index: true,
     },

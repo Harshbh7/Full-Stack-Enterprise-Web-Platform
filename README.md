@@ -1,199 +1,331 @@
-# EduSphere — Multi-Tenant Enterprise Learning Management System
+# EduSphere — Enterprise Multi-Tenant SaaS Learning Management System
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-18-cyan.svg)](https://react.dev/)
-[![Node.js](https://img.shields.io/badge/Node.js-22.x-green.svg)](https://nodejs.org/)
-[![Material UI](https://img.shields.io/badge/Material--UI-v6-blue.svg)](https://mui.com/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-8.x-brightgreen.svg)](https://www.mongodb.com/)
-[![Redis](https://img.shields.io/badge/Redis-7.x%2F9.x-red.svg)](https://redis.io/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
-
-**Project ID:** PGY2-01  
-**Project Title:** Full-Stack Enterprise Web Platform  
-**Mapped Courses:**
-- **CAP646** — Full Stack Web Development
-- **CAP774** — Styling and Scripting for Web Development  
-**Academic Target:** CA2 + CA3 Evaluation Exemption Validation  
-**Team Size:** 3–4 Students  
-**Duration:** 14–16 Weeks  
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB.svg?logo=react&logoColor=black)](https://react.dev/)
+[![Node.js](https://img.shields.io/badge/Node.js-22.x_LTS-339933.svg?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Vite](https://img.shields.io/badge/Vite-5.4-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Material UI](https://img.shields.io/badge/Material--UI-v6.1-007FFF.svg?logo=mui&logoColor=white)](https://mui.com/)
+[![Express](https://img.shields.io/badge/Express-4.21-000000.svg?logo=express&logoColor=white)](https://expressjs.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-8.x-47A248.svg?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Redis](https://img.shields.io/badge/Redis-7.x-DC382D.svg?logo=redis&logoColor=white)](https://redis.io/)
+[![Socket.IO](https://img.shields.io/badge/Socket.IO-4.8-010101.svg?logo=socketdotio&logoColor=white)](https://socket.io/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Vitest](https://img.shields.io/badge/Vitest-2.1-FCC72B.svg?logo=vitest&logoColor=black)](https://vitest.dev/)
 
 ---
 
 ## 1. Executive Summary
 
-**EduSphere** is a production-grade, multi-tenant enterprise Software-as-a-Service (SaaS) Learning Management System. It allows multiple independent educational institutions (universities, colleges, professional academies) to operate on a unified platform with strict logical tenant isolation, dedicated branding, role-based workflows, and real-time interaction capabilities.
+**EduSphere** is a high-concurrency, production-grade, multi-tenant Software-as-a-Service (SaaS) Learning Management Platform. It enables universities, colleges, and educational institutions to operate within their own isolated tenant partition with custom domain mapping, dedicated branding, multi-tier hierarchical identity verification, automated course delivery, timed assessments, and real-time collaboration.
 
-### Key Capabilities
-- **Strict Multi-Tenancy:** Subdomain / header / JWT tenant resolution with auto-scoped data access and negative isolation guarantees.
-- **Enterprise 6-Tier Architecture:** Route → Middleware → Controller → Service → Repository → Database.
-- **Robust Security & Auth:** Dual-token JWT (15-min access), cryptographically random refresh token rotation with token family reuse detection in Redis, Argon2id password hashing, and Google OAuth2 integration.
-- **Four-Tier RBAC:** Granular authorization covering `SUPER_ADMIN`, `TENANT_ADMIN`, `INSTRUCTOR`, and `STUDENT`.
-- **Curriculum & Assessment Engine:** Multi-format lessons (Video, Markdown, Files), auto-grading quizzes with time limits, and assignment submission/grading workflows.
-- **Real-Time Collaboration:** Socket.IO WebSocket server for live classroom chat, instant announcements, and notification dispatch.
-- **High-Performance Caching:** Redis cache-aside caching on popular course queries, catalog discovery, and dashboard telemetry with automated invalidation triggers.
-- **Modern Responsive Frontend:** React 18, Vite, Material UI (MUI v6) with unified design tokens (Plus Jakarta Sans, Cobalt Trust Palette), Redux Toolkit, and TanStack Query.
-- **Automated Testing & Quality Gates:** Vitest unit tests, Supertest integration tests, and Playwright end-to-end browser journeys.
-- **DevOps & Containerization:** Multi-stage Dockerfiles, Docker Compose stack, GitHub Actions CI/CD pipeline, and k6 load testing scenarios.
+### Core Architectural Pillars
+- **Strict Logical Tenant Isolation:** Dedicated tenant scoping at middleware and repository levels guarantees zero cross-tenant data leakage with automated database filtering.
+- **Enterprise 6-Tier Architecture:** Clean separation of concerns: `Route` $\rightarrow$ `Middleware` $\rightarrow$ `Controller` $\rightarrow$ `Service` $\rightarrow$ `Repository` $\rightarrow$ `Database`.
+- **Advanced Identity & Cryptography:** Dual-token JWT (15-minute access token) with cryptographically random refresh token family rotation, Redis token reuse detection, Argon2id password hashing, and Google Workspace SSO integration.
+- **3-Tier Hierarchical Approval Protocol:** Strict verification gates preventing unauthorized campus access:
+  - **College Administrators** verified by **Global Super Admin**
+  - **Faculty Instructors** verified by **College Administrators**
+  - **Students / Learners** verified by **Course Instructors**
+- **Real-Time Event Gateway:** Socket.IO WebSocket server for instant campus announcements, live chat broadcasts, and gradebook updates.
+- **Sub-10ms Redis Caching:** Redis cache-aside implementation with selective TTL and automated tag-based cache invalidation.
+- **Luxury Editorial Frontend:** React 18, Vite, Material UI (MUI v6) with customized luxury design tokens, Redux Toolkit state management, and responsive layouts.
 
 ---
 
-## 2. Architecture & Design Documentation
+## 2. Multi-Tier Hierarchical Verification Protocol
 
-| Documentation Resource | Path | Description |
-|:---|:---|:---|
-| **Requirement Traceability Matrix** | [`docs/requirement-traceability.md`](file:///Users/harshsharma/Desktop/PGY2/docs/requirement-traceability.md) | Maps all 27 non-negotiable requirements to files, tests, and evidence. |
-| **System Architecture** | [`docs/architecture/system-architecture.md`](file:///Users/harshsharma/Desktop/PGY2/docs/architecture/system-architecture.md) | Layered backend, request lifecycle, topology diagrams, caching flows. |
-| **Database Data Model** | [`docs/architecture/data-model.md`](file:///Users/harshsharma/Desktop/PGY2/docs/architecture/data-model.md) | Schemas, relations, compound indexes, and entity lifecycle specs. |
-| **RBAC Specification** | [`docs/architecture/rbac-matrix.md`](file:///Users/harshsharma/Desktop/PGY2/docs/architecture/rbac-matrix.md) | Granular permission matrix across all platform operations and roles. |
-| **Multi-Tenancy Strategy** | [`docs/architecture/multi-tenancy-strategy.md`](file:///Users/harshsharma/Desktop/PGY2/docs/architecture/multi-tenancy-strategy.md) | Tenant resolution, repository auto-scoping, and cross-tenant tests. |
-| **REST API Specification** | [`docs/api/api-specification.md`](file:///Users/harshsharma/Desktop/PGY2/docs/api/api-specification.md) | Complete `/api/v1` endpoint catalog, payloads, responses, error codes. |
-| **16-Week Roadmap** | [`docs/planning/16-week-roadmap.md`](file:///Users/harshsharma/Desktop/PGY2/docs/planning/16-week-roadmap.md) | Weekly development plan mapped to CA2 and CA3 checkpoints. |
-| **Stitch UI Exploration Plan** | [`docs/planning/stitch-screen-plan.md`](file:///Users/harshsharma/Desktop/PGY2/docs/planning/stitch-screen-plan.md) | Screen state definitions across Public, Admin, Instructor, and Student. |
-| **UI/UX Design System** | [`docs/planning/ui-ux-design-system.md`](file:///Users/harshsharma/Desktop/PGY2/docs/planning/ui-ux-design-system.md) | Plus Jakarta Sans typography, Cobalt tokens, and WCAG AA rules. |
-| **Context7 Verification Registry** | [`docs/planning/context7-verification-registry.md`](file:///Users/harshsharma/Desktop/PGY2/docs/planning/context7-verification-registry.md) | Official documentation references, breaking changes, and verified APIs. |
-| **Architecture Decision Records** | [`docs/adr/ADR-001-to-010.md`](file:///Users/harshsharma/Desktop/PGY2/docs/adr/ADR-001-to-010.md) | ADR-001 through ADR-010 documenting design rationale and tradeoffs. |
+To prevent unauthorized access and maintain academic governance, EduSphere employs a strict 3-tier approval hierarchy. When a user authenticates via Google Workspace SSO or registers on a campus, their account is placed into a `PENDING_VERIFICATION` holding state until approved by their designated authority:
+
+```mermaid
+flowchart TD
+    A["New User / Google SSO Login"] --> B{"Registered & Active in Campus?"}
+    B -->|Yes| C["Direct Dashboard Entry"]
+    B -->|No| D["Select Campus & Request Role"]
+    D --> E{"Requested Role"}
+    
+    E -->|College Admin| F["Designated Verifier: Global Super Admin"]
+    E -->|Teacher / Instructor| G["Designated Verifier: College Administrator"]
+    E -->|Student / Learner| H["Designated Verifier: Course Teacher"]
+    
+    F --> I["Holding State: PENDING_VERIFICATION (Zero Dashboard Access)"]
+    G --> I
+    H --> I
+    
+    I --> J{"Authority Decision"}
+    J -->|Approved| K["Account Status: ACTIVE → Access Granted"]
+    J -->|Rejected| L["Account Status: REJECTED → Access Denied"]
+```
+
+### Security Gates Enforced
+1. **Zero Access While Pending:** Unverified accounts cannot retrieve JWT tokens or access any private dashboard API endpoints.
+2. **Cross-Tenant Authorization Block:** An administrator of College A cannot view, approve, or reject accounts belonging to College B (`CROSS_TENANT_VIOLATION`).
+3. **Self-Approval Prohibited:** Users cannot approve their own accounts (`SELF_APPROVAL_PROHIBITED`).
+4. **Rate Limiting:** Redis-backed rate limiters enforce 15 auth requests/minute on login/SSO endpoints and 200 requests/minute on general API routes.
 
 ---
 
 ## 3. Technology Stack
 
-### Frontend
-- **Framework:** React 18 with TypeScript
-- **Build Tool:** Vite
-- **UI Library:** Material UI (MUI v6) with Emotion
-- **Routing:** React Router v6
-- **Global State:** Redux Toolkit
-- **Server Cache:** TanStack Query v5
-- **Form Management:** React Hook Form + Zod
-- **Real-Time Client:** Socket.IO Client
-- **Charts & Telemetry:** Recharts
+### Frontend Architecture
+- **Framework & Runtime:** React 18 with TypeScript 5.6
+- **Tooling & Bundler:** Vite 5.4 (optimized code-splitting with manual vendor chunking)
+- **Component System:** Material UI (MUI v6) + Emotion Styled Engine
+- **State Management:** Redux Toolkit 2.2 + Typed Hooks
+- **Data Fetching & Cache:** TanStack React Query v5
+- **Forms & Validation:** React Hook Form 7.53 + Zod 3.23
+- **Data Visualization:** Recharts 2.12
+- **Real-Time Client:** Socket.IO Client 4.8
 - **Icons:** Material UI Icons & Lucide React
 
-### Backend
-- **Runtime:** Node.js (v20+ / v22 LTS)
-- **Framework:** Express.js with TypeScript
-- **Database:** MongoDB 8.x with Mongoose ODM
-- **Cache & Message Broker:** Redis 7.x / Valkey 9.x
-- **Real-Time Gateway:** Socket.IO Server
-- **Security & Crypto:** Argon2id, JSON Web Tokens (JWT), Helmet, CORS
-- **Request Validation:** Zod
-- **Logging:** Winston + Morgan HTTP logger
+### Backend Architecture
+- **Runtime:** Node.js 22 LTS
+- **Web Framework:** Express 4.21 with TypeScript
+- **Database & ODM:** MongoDB 8.x + Mongoose 8.7
+- **Caching & Broker:** Redis 7.x / ioredis 5.4
+- **Real-Time Gateway:** Socket.IO 4.8 with tenant-scoped rooms
+- **Security & Password Hashing:** Argon2id (`argon2` 0.41), JSON Web Tokens (`jsonwebtoken` 9.0), Helmet, CORS, Cookie-Parser
+- **Request Validation:** Zod schema middleware
+- **Structured Logging:** Winston 3.14 + Morgan HTTP logging
 
-### Testing & Quality
-- **Unit & Integration:** Vitest, Supertest
-- **Component Testing:** React Testing Library, Jest-DOM
-- **End-to-End Testing:** Playwright
-- **Load & Performance Testing:** k6
-
-### DevOps & Deployment
-- **Containerization:** Docker & Docker Compose
-- **Web Server / Reverse Proxy:** Nginx
-- **CI/CD:** GitHub Actions
+### Testing & DevOps
+- **Unit & Integration Testing:** Vitest 2.1, Supertest 7.0
+- **E2E Browser Automation:** Playwright
+- **Containerization:** Docker multi-stage builds & Docker Compose
+- **Web Server:** Nginx (reverse proxy & static gzip/brotli delivery)
 
 ---
 
-## 4. Repository Structure
+## 4. Role-Based Access Control (RBAC) Matrix
+
+| Platform Capability | Super Admin (`SUPER_ADMIN`) | College Admin (`TENANT_ADMIN`) | Faculty (`INSTRUCTOR`) | Student (`STUDENT`) |
+|:---|:---:|:---:|:---:|:---:|
+| **Provision & Suspend Institutions** | Yes | No | No | No |
+| **Verify College Administrators** | Yes | No | No | No |
+| **Verify Instructors** | Yes | Yes (Own Campus) | No | No |
+| **Verify Students** | Yes | Yes (Own Campus) | Yes (Own Campus) | No |
+| **Create & Author Courses** | Yes | Yes | Yes | No |
+| **Create Timed Quizzes & Assessments** | Yes | Yes | Yes | No |
+| **Grade Quizzes & Export Gradebook** | Yes | Yes | Yes | No |
+| **Enroll into Courses** | No | No | No | Yes |
+| **Attempt Quizzes & Submit Work** | No | No | No | Yes |
+| **Broadcast Campus Announcements** | Yes | Yes | Yes | No |
+| **Cross-Tenant Telemetry & Logs** | Yes | No | No | No |
+
+---
+
+## 5. Repository Structure
 
 ```text
-PGY2/
+Full-Stack-Enterprise-Web-Platform/
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml                 # Automated Lint, Test, Build Pipeline
-│       └── cd.yml                 # Staging / Container Deployment
+│       ├── ci.yml                 # Automated Lint, Unit Tests, and Build Pipeline
+│       └── cd.yml                 # Container deployment workflow
 ├── backend/
 │   ├── src/
-│   │   ├── config/                # Environment, Database, Redis, OAuth configs
-│   │   ├── controllers/           # HTTP Request Handlers
-│   │   ├── middleware/            # Tenant, Auth, RBAC, Validation, Cache middlewares
-│   │   ├── models/                # Mongoose Schema Definitions
-│   │   ├── repositories/          # Tenant-Scoped Data Repositories
-│   │   ├── routes/                # API Route Definitions (/api/v1)
-│   │   ├── schemas/               # Zod Input Validation Schemas
-│   │   ├── services/              # Pure Domain Business Logic
-│   │   ├── sockets/               # Real-Time Socket.IO Handlers & Rooms
-│   │   ├── types/                 # TypeScript Interface Definitions
-│   │   ├── utils/                 # JWT, Crypto, Pagination, Response Helpers
-│   │   ├── app.ts                 # Express Application Configuration
-│   │   └── server.ts              # HTTP & WebSocket Server Entrypoint
+│   │   ├── config/                # Environment, Mongoose, Redis configs
+│   │   ├── controllers/           # HTTP Request Handlers (Auth, Tenant, User, Course, Quiz)
+│   │   ├── middleware/            # Tenant, Auth, RBAC, Rate-limit, Cache middlewares
+│   │   ├── models/                # Schemas (Tenant, User, Course, Quiz, Announcement, Token)
+│   │   ├── repositories/          # Scoped repositories with auto-injected tenant filter
+│   │   ├── routes/v1/             # REST API v1 Endpoints
+│   │   ├── schemas/               # Zod validation schemas
+│   │   ├── services/              # Domain logic (Auth, User, Course, Quiz, Announcement)
+│   │   ├── sockets/               # Real-time WebSocket handlers and tenant rooms
+│   │   ├── types/                 # Shared TypeScript interfaces & declarations
+│   │   ├── utils/                 # JWT, Argon2id hashing, Pagination, API response wrappers
+│   │   ├── app.ts                 # Express application setup
+│   │   └── server.ts              # HTTP & WebSocket startup entrypoint
 │   ├── tests/
-│   │   ├── unit/                  # Service & Utility Unit Tests
-│   │   └── integration/           # Supertest API & Tenant Isolation Tests
-│   ├── Dockerfile
+│   │   ├── unit/                  # Unit tests (Password, JWT, RBAC, Pagination)
+│   │   └── integration/           # Integration tests (Tenant isolation, Auth)
+│   ├── Dockerfile                 # Backend production container
 │   ├── package.json
 │   └── tsconfig.json
 ├── frontend/
 │   ├── src/
-│   │   ├── app/                   # App Providers & Root Config
-│   │   ├── components/            # Reusable UI Components (Tables, Modals, Forms)
-│   │   ├── features/              # Feature Modules (Auth, Courses, Quizzes, Analytics)
-│   │   ├── hooks/                 # Custom React Hooks
-│   │   ├── layouts/               # Dashboard, Auth, Public Layout Shells
-│   │   ├── routes/                # Route Declarations & Protected Guards
-│   │   ├── services/              # API Client & Socket Connection Services
-│   │   ├── store/                 # Redux Toolkit Slices & Typed Hooks
-│   │   ├── theme/                 # MUI v6 Design System Tokens & Components
-│   │   ├── types/                 # Shared TypeScript Type Definitions
-│   │   └── main.tsx               # Client Entrypoint
-│   ├── Dockerfile
-│   ├── nginx.conf
+│   │   ├── app/                   # App root component and providers
+│   │   ├── config/                # Client configurations (Firebase SDK, API endpoints)
+│   │   ├── layouts/               # Dashboard, Public, and Auth layout wrappers
+│   │   ├── pages/                 # Views (LandingPage, LoginPage, DashboardPage)
+│   │   ├── routes/                # Protected route guards and navigation setup
+│   │   ├── services/              # API client, WebSocket, and persistent storage services
+│   │   ├── store/                 # Redux Toolkit store and auth slices
+│   │   ├── theme/                 # Editorial luxury design tokens and MUI theme
+│   │   └── types/                 # Frontend TypeScript models
+│   ├── public/                    # Static assets
+│   ├── Dockerfile                 # Frontend multi-stage container
+│   ├── nginx.conf                 # Nginx SPA reverse proxy configuration
 │   ├── package.json
 │   └── vite.config.ts
-├── docs/                          # Comprehensive Architecture, API & ADR Specs
+├── docs/                          # Architecture, ADRs, Security & API specifications
 ├── scripts/
-│   ├── load-testing/              # k6 Performance Scenarios
-│   └── seed/                      # Multi-Tenant Realistic Seed Data Scripts
-├── docker-compose.yml             # Local Multi-Service Development Stack
-├── docker-compose.prod.yml        # Production Container Stack
+│   └── load-testing/              # k6 stress and load testing scripts
+├── docker-compose.yml             # Development orchestration (App, MongoDB, Redis)
 └── README.md
 ```
 
 ---
 
-## 5. Quick Start (Local Development)
+## 6. REST API Reference (v1)
+
+### Authentication & Identity
+| Method | Endpoint | Access | Description |
+|:---|:---|:---|:---|
+| `POST` | `/api/v1/auth/login` | Public | Password login with Argon2id check & token rotation |
+| `POST` | `/api/v1/auth/sso/google` | Public | Google SSO sign-in or hierarchical role registration |
+| `POST` | `/api/v1/auth/refresh` | Public | Rotates refresh token and issues fresh access token |
+| `POST` | `/api/v1/auth/logout` | Authenticated | Revokes active refresh token family in Redis |
+| `GET`  | `/api/v1/auth/me` | Authenticated | Returns current authenticated user profile |
+
+### Tenant Administration
+| Method | Endpoint | Access | Description |
+|:---|:---|:---|:---|
+| `GET`  | `/api/v1/tenants/public` | Public | Lists active campuses for login selection |
+| `GET`  | `/api/v1/tenants` | Super Admin | Lists all tenants with student statistics |
+| `POST` | `/api/v1/tenants` | Super Admin | Provisions a new campus institution with domain |
+| `DELETE`| `/api/v1/tenants/:id` | Super Admin | Decommissions institution and removes tenant data |
+
+### User Management & Hierarchical Verification
+| Method | Endpoint | Access | Description |
+|:---|:---|:---|:---|
+| `GET`  | `/api/v1/users` | Tenant Admin+ | Scoped roster of users within institution |
+| `GET`  | `/api/v1/users/pending-verifications` | Verifier Authority | Retrieves pending role requests for approval |
+| `POST` | `/api/v1/users/:id/approve` | Verifier Authority | Approves pending user and activates workspace access |
+| `POST` | `/api/v1/users/:id/reject` | Verifier Authority | Rejects pending registration request |
+| `POST` | `/api/v1/users/reset-password` | Authorized Role | Resets credentials according to RBAC rules |
+| `DELETE`| `/api/v1/users/:id` | Tenant Admin+ | Removes user from tenant roster |
+
+### Courses & Assessments
+| Method | Endpoint | Access | Description |
+|:---|:---|:---|:---|
+| `GET`  | `/api/v1/courses` | Authenticated | Retrieves tenant courses (cached in Redis) |
+| `POST` | `/api/v1/courses` | Faculty+ | Creates new course syllabus and invalidates cache |
+| `GET`  | `/api/v1/quizzes` | Authenticated | Lists assessments with time limits and questions |
+| `POST` | `/api/v1/quizzes` | Faculty+ | Creates auto-graded assessment |
+| `POST` | `/api/v1/quizzes/:id/submit` | Student | Submits answers and calculates real-time grade |
+
+---
+
+## 7. Quick Start & Installation
 
 ### Prerequisites
-- Node.js v20+ or v22 LTS
-- MongoDB v7+ or v8+ (running on `localhost:27017`)
-- Redis v7+ or Valkey v9+ (running on `localhost:6379`)
+- **Node.js:** v20.x or v22.x LTS
+- **MongoDB:** v7.x or v8.x running locally on port `27017`
+- **Redis:** v7.x running locally on port `6379`
+- **npm** or **yarn**
 
-### Option A: Direct Local Execution
+### Option A: Local Development Setup
 
-1. **Clone & Configure Environment:**
+1. **Clone the Repository:**
    ```bash
-   cp backend/.env.example backend/.env
-   cp frontend/.env.example frontend/.env
+   git clone https://github.com/Harshbh7/Full-Stack-Enterprise-Web-Platform.git
+   cd Full-Stack-Enterprise-Web-Platform
    ```
 
-2. **Start Backend:**
+2. **Backend Setup:**
    ```bash
    cd backend
    npm install
+   cp .env.example .env
    npm run dev
-   # Server boots at http://localhost:5000 (API: http://localhost:5000/api/v1)
+   # Backend starts on http://localhost:5000 (API v1 at http://localhost:5000/api/v1)
    ```
 
-3. **Start Frontend:**
+3. **Frontend Setup (in a separate terminal):**
    ```bash
    cd frontend
    npm install
+   cp .env.example .env
    npm run dev
-   # Vite development server runs at http://localhost:5173
+   # Vite dev server starts on http://localhost:5173
    ```
 
-### Option B: Docker Compose (One-Command Startup)
+4. **Access the Application:**
+   Open your browser and navigate to `http://localhost:5173`.
+
+---
+
+### Option B: Docker Compose (Full Stack with 1 Command)
+
+Ensure Docker Desktop is running, then execute:
 
 ```bash
 docker compose up --build
 ```
-This automatically starts:
-- Frontend Web App at `http://localhost:3000`
-- Backend API at `http://localhost:5000`
-- MongoDB at `localhost:27017`
-- Redis at `localhost:6379`
+
+This starts:
+- **Frontend SPA:** `http://localhost:3000`
+- **Backend API:** `http://localhost:5000`
+- **MongoDB Database:** `localhost:27017`
+- **Redis Cache & Broker:** `localhost:6379`
+
+To stop the containers:
+```bash
+docker compose down
+```
 
 ---
 
-## 6. Verification & Evaluation Gates
+## 8. Pre-Seeded Default Accounts (For Testing & Review)
 
-- **CA2 Evaluation Gate (Week 8):** Layered architecture, JWT authentication with refresh token rotation, tenant isolation middleware, core course models, and unit/integration test suite.
-- **CA3 Evaluation Gate (Week 15–16):** Full LMS workflow (lessons, quizzes, assignments), real-time WebSockets, Redis caching benchmarks, Playwright E2E suite, k6 load testing report, and Dockerized production deployment.
+The database seed provides standard institutional accounts with predefined passwords for demonstration:
+
+| Role | Email | Campus | Default Password |
+|:---|:---|:---|:---|
+| **Global Super Admin** | `superadmin@edusphere.io` | Global Portal | `Password123!` |
+| **Apex University Admin** | `admin@apex.edu` | Apex University | `Password123!` |
+| **Faculty Instructor** | `prof.smith@apex.edu` | Apex University | `Password123!` |
+| **Enrolled Student** | `student.alice@apex.edu` | Apex University | `Password123!` |
+| **LPU Campus Admin** | `admin@lpu.edu` | Lovely Professional University | `Password123!` |
+
+> [!NOTE]
+> For Google SSO testing, any institutional or personal Google account can sign in. If the account is new, it transitions to the **Register New Role** workflow where campus and role are selected, entering the hierarchical verification pipeline.
+
+---
+
+## 9. Testing & Quality Verification
+
+### Run Backend Unit Tests (Vitest)
+```bash
+cd backend
+npm run test -- tests/unit/
+```
+Output:
+```text
+Test Files  4 passed (4)
+     Tests  15 passed (15)
+  Duration  1.48s
+```
+
+### Run TypeScript Type Checks & Lint
+```bash
+# Check frontend
+npm --prefix frontend run lint
+
+# Check backend
+npm --prefix backend run lint
+```
+
+### Production Build Verification
+```bash
+npm --prefix frontend run build
+```
+
+---
+
+## 10. Security Features & Compliance
+
+- **Argon2id Password Storage:** Uses state-of-the-art memory-hard Argon2id algorithm resistant to GPU and ASIC brute-force attacks.
+- **Refresh Token Family Rotation:** Every token refresh revokes the prior token. If a revoked token is replayed, the entire token family is immediately invalidated in Redis to halt session hijacking.
+- **XSS & Injection Protection:** Helmet HTTP security headers (CSP, HSTS, frameguard), strictly typed Zod request body validation, and parameterized MongoDB queries.
+- **Multi-Tenant Scoping:** Negative isolation checks ensure queries with mismatched tenant IDs return 404 or empty sets without cross-talk.
+- **Strict Role Verification:** New accounts cannot enter dashboards without explicit cryptographic approval by the designated supervisor role.
+
+---
+
+## 11. Authors & License
+
+- **Developer:** Harsh Sharma ([@Harshbh7](https://github.com/Harshbh7))
+- **Repository:** [https://github.com/Harshbh7/Full-Stack-Enterprise-Web-Platform](https://github.com/Harshbh7/Full-Stack-Enterprise-Web-Platform)
+- **License:** MIT License. Free for academic, enterprise, and open-source software collaboration.

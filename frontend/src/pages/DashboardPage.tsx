@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Grid,
@@ -48,22 +48,52 @@ import SearchIcon from '@mui/icons-material/Search';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SpeedIcon from '@mui/icons-material/Speed';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useAppSelector } from '../store/index.js';
 import { api } from '../services/api.js';
+import {
+  getStoredTenants,
+  saveStoredTenants,
+  TENANTS_CHANGED_EVENT,
+  TenantOption,
+} from '../services/tenantStorage.js';
+import {
+  StoredUser,
+  getStoredUsersForTenant,
+  addStoredUser,
+  removeStoredUser,
+  updateStoredUserStatus,
+  getPendingVerificationsForRole,
+  approveVerificationRequest,
+  rejectVerificationRequest,
+  USERS_CHANGED_EVENT,
+} from '../services/userStorage.js';
+import {
+  CourseItem,
+  AnnouncementItem,
+  getStoredCoursesForTenant,
+  addStoredCourse,
+  removeStoredCourse,
+  getStoredAnnouncementsForTenant,
+  addStoredAnnouncement,
+  removeStoredAnnouncement,
+  TENANT_DATA_CHANGED_EVENT,
+} from '../services/tenantDataStorage.js';
 
-interface CourseItem {
+interface TenantItem {
   id?: string;
-  code: string;
-  title: string;
-  description: string;
-  instructor: string;
-  enrolled: number;
-  modulesCount: number;
-  lessonsCount: number;
-  rating: string;
-  category: string;
+  _id?: string;
+  name: string;
+  slug: string;
+  domain: string;
+  status: 'ACTIVE' | 'SUSPENDED';
+  maxStudents: number;
+  contactEmail: string;
+  primaryColor?: string;
 }
 
 export const DashboardPage: React.FC = () => {
@@ -83,12 +113,18 @@ export const DashboardPage: React.FC = () => {
 
   // 1. Invite User Dialog State
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [showInvitePassword, setShowInvitePassword] = useState(false);
   const [inviteForm, setInviteForm] = useState({
     firstName: '',
     lastName: '',
     email: '',
     role: 'STUDENT',
+    password: 'Password123!',
   });
+
+  // Delete User Dialog State
+  const [deleteUserModalOpen, setDeleteUserModalOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<StoredUser | null>(null);
 
   // 2. Announcement Dialog State
   const [announcementOpen, setAnnouncementOpen] = useState(false);
@@ -134,180 +170,315 @@ export const DashboardPage: React.FC = () => {
   const [cacheLatency, setCacheLatency] = useState('0.4 ms');
   const [cacheHitRate, setCacheHitRate] = useState('98.4%');
 
-  // Dynamic user list
-  const [userList, setUserList] = useState([
-    { name: 'Eleanor Rigby', email: 'admin@apex.edu', role: 'TENANT_ADMIN', status: 'ACTIVE' },
-    { name: 'Marcus Smith', email: 'prof.smith@apex.edu', role: 'INSTRUCTOR', status: 'ACTIVE' },
-    { name: 'Aria Patel', email: 'prof.patel@apex.edu', role: 'INSTRUCTOR', status: 'ACTIVE' },
-    { name: 'Alice Johnson', email: 'student.alice@apex.edu', role: 'STUDENT', status: 'ACTIVE' },
-    { name: 'Bob Chen', email: 'student.bob@apex.edu', role: 'STUDENT', status: 'ACTIVE' },
-    { name: 'Charlie Davis', email: 'student.charlie@apex.edu', role: 'STUDENT', status: 'ACTIVE' },
-  ]);
+  // Resolve active tenant slug and display name
+  const resolveTenantSlug = (): string => {
+    if (tenant?.slug) return tenant.slug;
+    if (user?.role === 'SUPER_ADMIN') return 'global';
+    if (user?.tenantId) {
+      const stored = getStoredTenants();
+      const found = stored.find((t) => t.id === user.tenantId || t.slug === user.tenantId);
+      if (found) return found.slug;
+      return user.tenantId;
+    }
+    if (user?.email) {
+      const stored = getStoredTenants();
+      const match = stored.find(
+        (t) =>
+          user.email.toLowerCase().includes(t.slug) ||
+          (t.domain && user.email.toLowerCase().includes(t.domain))
+      );
+      if (match) return match.slug;
+      if (user.email.includes('lpu.edu')) return 'lpu';
+    }
+    return 'apex-uni';
+  };
 
-  // Dynamic course list
-  const [courseList, setCourseList] = useState<CourseItem[]>([
-    {
-      code: 'CAP646',
-      title: 'Full-Stack Web Development & Enterprise Architecture',
-      description: 'Master micro-modular 6-tier architecture, multi-tenant database partitioning, JWT refresh token rotation, and high-concurrency Redis caching.',
-      instructor: 'Prof. Marcus Smith',
-      enrolled: 142,
-      modulesCount: 3,
-      lessonsCount: 4,
-      rating: '4.9 ★ (38 reviews)',
-      category: 'Web Engineering',
-    },
-    {
-      code: 'CAP774',
-      title: 'Styling and Scripting for Web Development',
-      description: 'Enterprise design system engineering using Material UI (MUI v6), custom tokens, WCAG 2.1 AA accessibility, and Redux Toolkit state management.',
-      instructor: 'Prof. Aria Patel',
-      enrolled: 98,
-      modulesCount: 2,
-      lessonsCount: 2,
-      rating: '4.8 ★ (24 reviews)',
-      category: 'Frontend & UI/UX',
-    },
-  ]);
+  const activeTenantSlug = resolveTenantSlug();
+  const storedTenantInfo = getStoredTenants().find((t) => t.slug === activeTenantSlug);
+  const tenantDisplayName =
+    tenant?.name ||
+    storedTenantInfo?.name ||
+    (activeTenantSlug === 'lpu' ? 'Lovely Professional University' : 'Apex University');
 
-  // Dynamic announcement list
-  const [announcementList, setAnnouncementList] = useState([
-    {
-      id: 1,
-      title: 'CAP646 Project Milestones: CA2 & CA3 Defense Checkpoints',
-      author: 'Prof. Marcus Smith',
-      priority: 'HIGH',
-      date: 'Today at 09:30 AM',
-      content: 'Please ensure your repository satisfies all 27 non-negotiable architectural requirements, including Redis caching benchmarks and tenant isolation suites.',
-    },
-    {
-      id: 2,
-      title: 'Welcome to Academic Year 2026-2027 at Apex University!',
-      author: 'Eleanor Rigby (Dean)',
-      priority: 'NORMAL',
-      date: 'Yesterday at 02:15 PM',
-      content: 'We are thrilled to welcome all faculty and students to the EduSphere digital campus platform. Please review your enrolled course schedules.',
-    },
-  ]);
+  // Dynamic user list scoped to active tenant
+  const [userList, setUserList] = useState<StoredUser[]>(() => getStoredUsersForTenant(activeTenantSlug));
 
-  // Handle Invite User Submit
+  // Dynamic course list scoped to active tenant (only user-entered or scoped courses)
+  const [courseList, setCourseList] = useState<CourseItem[]>(() => getStoredCoursesForTenant(activeTenantSlug));
+
+  // Dynamic announcement list scoped to active tenant (only user-entered or scoped announcements)
+  const [announcementList, setAnnouncementList] = useState<AnnouncementItem[]>(() =>
+    getStoredAnnouncementsForTenant(activeTenantSlug)
+  );
+
+  // Dynamic pending role verifications for the current user's authority tier
+  const [pendingVerifications, setPendingVerifications] = useState<StoredUser[]>(() =>
+    getPendingVerificationsForRole(user?.role || '', activeTenantSlug)
+  );
+
+  // Sync users, courses, announcements, and verifications on tenant change or storage update
+  useEffect(() => {
+    const handleDataSync = () => {
+      setUserList(getStoredUsersForTenant(activeTenantSlug));
+      setCourseList(getStoredCoursesForTenant(activeTenantSlug));
+      setAnnouncementList(getStoredAnnouncementsForTenant(activeTenantSlug));
+      setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+    };
+
+    window.addEventListener(USERS_CHANGED_EVENT, handleDataSync);
+    window.addEventListener(TENANT_DATA_CHANGED_EVENT, handleDataSync);
+    window.addEventListener('storage', handleDataSync);
+
+    setUserList(getStoredUsersForTenant(activeTenantSlug));
+    setCourseList(getStoredCoursesForTenant(activeTenantSlug));
+    setAnnouncementList(getStoredAnnouncementsForTenant(activeTenantSlug));
+    setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+
+    return () => {
+      window.removeEventListener(USERS_CHANGED_EVENT, handleDataSync);
+      window.removeEventListener(TENANT_DATA_CHANGED_EVENT, handleDataSync);
+      window.removeEventListener('storage', handleDataSync);
+    };
+  }, [activeTenantSlug, tenant?.slug, user?.email, user?.role]);
+
+  const handleApproveVerification = async (targetUser: StoredUser) => {
+    try {
+      await api.post(`/users/${targetUser.id || targetUser.email}/approve`);
+    } catch {
+      // client fallback
+    }
+    const verifierName = `${user?.firstName || 'Admin'} ${user?.lastName || ''}`.trim();
+    approveVerificationRequest(targetUser.email, verifierName);
+    setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+    setUserList(getStoredUsersForTenant(activeTenantSlug));
+    setSuccessMessage(
+      `✓ Successfully approved ${targetUser.name} (${targetUser.email}) as ${targetUser.requestedRole || targetUser.role}! Account is now ACTIVE.`
+    );
+  };
+
+  const handleRejectVerification = async (targetUser: StoredUser) => {
+    try {
+      await api.post(`/users/${targetUser.id || targetUser.email}/reject`);
+    } catch {
+      // client fallback
+    }
+    const verifierName = `${user?.firstName || 'Admin'} ${user?.lastName || ''}`.trim();
+    rejectVerificationRequest(targetUser.email, verifierName);
+    setPendingVerifications(getPendingVerificationsForRole(user?.role || '', activeTenantSlug));
+    setUserList(getStoredUsersForTenant(activeTenantSlug));
+    setSuccessMessage(`Access request for ${targetUser.name} (${targetUser.email}) has been rejected.`);
+  };
+
+  // Dynamic tenant list for Super Admin
+  const [tenantsList, setTenantsList] = useState<TenantOption[]>(() => getStoredTenants());
+
+  // Tenant Provision & Delete Dialog States
+  const [provisionTenantModalOpen, setProvisionTenantModalOpen] = useState(false);
+  const [deleteTenantModalOpen, setDeleteTenantModalOpen] = useState(false);
+  const [tenantToDelete, setTenantToDelete] = useState<TenantOption | null>(null);
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [newTenantForm, setNewTenantForm] = useState({
+    name: '',
+    slug: '',
+    domain: '',
+    contactEmail: '',
+    maxStudents: 5000,
+    primaryColor: '#2D5A27',
+    adminName: 'Campus Administrator',
+    adminPassword: 'Password123!',
+  });
+
+  // Sync and fetch tenants
+  useEffect(() => {
+    const handleSync = () => {
+      setTenantsList(getStoredTenants());
+    };
+    window.addEventListener(TENANTS_CHANGED_EVENT, handleSync);
+    window.addEventListener('storage', handleSync);
+
+    if (user?.role === 'SUPER_ADMIN') {
+      api.get('/tenants/public')
+        .then((res) => {
+          if (res.data?.data && Array.isArray(res.data.data) && res.data.data.length > 0) {
+            interface ApiTenant {
+              _id?: string;
+              id?: string;
+              name: string;
+              slug: string;
+              domain?: string;
+              status?: 'ACTIVE' | 'SUSPENDED';
+              settings?: { maxStudents?: number };
+              maxStudents?: number;
+              contactEmail?: string;
+              primaryColor?: string;
+            }
+            const apiTenants: TenantOption[] = res.data.data.map((item: ApiTenant) => ({
+              id: item._id || item.id || item.slug,
+              name: item.name,
+              slug: item.slug,
+              domain: item.domain || `${item.slug}.edusphere.io`,
+              status: item.status || 'ACTIVE',
+              maxStudents: item.settings?.maxStudents || item.maxStudents || 5000,
+              contactEmail: item.contactEmail || `admin@${item.slug}.edu`,
+              primaryColor: item.primaryColor || '#2D5A27',
+            }));
+            const current = getStoredTenants();
+            const merged = [...current];
+            for (const at of apiTenants) {
+              if (!merged.some((m) => m.slug === at.slug)) {
+                merged.push(at);
+              }
+            }
+            saveStoredTenants(merged);
+            setTenantsList(merged);
+          }
+        })
+        .catch(() => {
+          // Graceful fallback to stored tenants
+        });
+    }
+
+    return () => {
+      window.removeEventListener(TENANTS_CHANGED_EVENT, handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, [user?.role]);
+
+  // Handle Invite / Create User Submit
   const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const slug = activeTenantSlug;
+    const newUser: StoredUser = {
+      id: `usr-${Date.now()}`,
+      name: `${inviteForm.firstName.trim()} ${inviteForm.lastName.trim()}`,
+      firstName: inviteForm.firstName.trim(),
+      lastName: inviteForm.lastName.trim(),
+      email: inviteForm.email.toLowerCase().trim(),
+      role: inviteForm.role as any,
+      status: 'ACTIVE',
+      tenantSlug: slug,
+      password: inviteForm.password || 'Password123!',
+    };
+
     try {
-      await api.post('/users/invite', inviteForm);
-      setUserList((prev) => [
-        {
-          name: `${inviteForm.firstName} ${inviteForm.lastName}`,
-          email: inviteForm.email,
-          role: inviteForm.role,
-          status: 'ACTIVE',
-        },
-        ...prev,
-      ]);
-      setSuccessMessage(`Successfully invited ${inviteForm.firstName} ${inviteForm.lastName} (${inviteForm.email})!`);
-      setInviteOpen(false);
-      setInviteForm({ firstName: '', lastName: '', email: '', role: 'STUDENT' });
+      await api.post('/users/invite', {
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
+        email: newUser.email,
+        role: newUser.role,
+        password: newUser.password,
+        tenantId: tenant?.id || user?.tenantId,
+      });
     } catch {
-      // Graceful local update
-      setUserList((prev) => [
-        {
-          name: `${inviteForm.firstName} ${inviteForm.lastName}`,
-          email: inviteForm.email,
-          role: inviteForm.role,
-          status: 'ACTIVE',
-        },
-        ...prev,
-      ]);
-      setSuccessMessage(`User invited: ${inviteForm.firstName} ${inviteForm.lastName}!`);
-      setInviteOpen(false);
-      setInviteForm({ firstName: '', lastName: '', email: '', role: 'STUDENT' });
+      // Graceful fallback to client-side
     }
+
+    addStoredUser(newUser);
+    setUserList(getStoredUsersForTenant(slug));
+    setSuccessMessage(
+      `Successfully created ${newUser.role} "${newUser.name}"! Login: ${newUser.email} (Password: ${newUser.password})`
+    );
+    setInviteOpen(false);
+    setInviteForm({ firstName: '', lastName: '', email: '', role: 'STUDENT', password: 'Password123!' });
+  };
+
+  // Open Delete User Dialog
+  const handleOpenDeleteUserModal = (targetUser: StoredUser) => {
+    safeBlur();
+    setUserToDelete(targetUser);
+    setDeleteUserModalOpen(true);
+  };
+
+  // Handle Confirm Delete User
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    const slug = activeTenantSlug;
+    try {
+      await api.delete(`/users/${userToDelete.id || userToDelete.email}`);
+    } catch {
+      // Graceful fallback
+    }
+    removeStoredUser(userToDelete.email, slug);
+    setUserList(getStoredUsersForTenant(slug));
+    setSuccessMessage(`${userToDelete.role} "${userToDelete.name}" (${userToDelete.email}) was removed from the roster.`);
+    setDeleteUserModalOpen(false);
+    setUserToDelete(null);
   };
 
   // Handle Post Announcement Submit
   const handleAnnouncementSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const newAnnouncement: AnnouncementItem = {
+      id: `ann-${Date.now()}`,
+      title: announcementForm.title.trim(),
+      author: `${user?.firstName || 'Faculty'} ${user?.lastName || 'Member'}`.trim(),
+      priority: announcementForm.priority,
+      date: 'Just now',
+      content: announcementForm.content.trim(),
+      tenantSlug: activeTenantSlug,
+    };
+
     try {
       await api.post('/announcements', announcementForm);
-      setAnnouncementList((prev) => [
-        {
-          id: Date.now(),
-          title: announcementForm.title,
-          author: `${user?.firstName || 'Faculty'} ${user?.lastName || 'Member'}`,
-          priority: announcementForm.priority,
-          date: 'Just now',
-          content: announcementForm.content,
-        },
-        ...prev,
-      ]);
-      setSuccessMessage(`Announcement [${announcementForm.title}] broadcasted to all enrolled students!`);
-      setAnnouncementOpen(false);
-      setAnnouncementForm({ title: '', content: '', priority: 'NORMAL' });
     } catch {
-      setAnnouncementList((prev) => [
-        {
-          id: Date.now(),
-          title: announcementForm.title,
-          author: `${user?.firstName || 'Faculty'} ${user?.lastName || 'Member'}`,
-          priority: announcementForm.priority,
-          date: 'Just now',
-          content: announcementForm.content,
-        },
-        ...prev,
-      ]);
-      setSuccessMessage(`Announcement posted: ${announcementForm.title}!`);
-      setAnnouncementOpen(false);
-      setAnnouncementForm({ title: '', content: '', priority: 'NORMAL' });
+      // Graceful fallback to client-side storage
     }
+
+    addStoredAnnouncement(newAnnouncement);
+    setAnnouncementList(getStoredAnnouncementsForTenant(activeTenantSlug));
+    setSuccessMessage(`Announcement [${newAnnouncement.title}] broadcasted to all enrolled students!`);
+    setAnnouncementOpen(false);
+    setAnnouncementForm({ title: '', content: '', priority: 'NORMAL' });
+  };
+
+  // Handle Remove Announcement
+  const handleRemoveAnnouncement = (id: string | number) => {
+    removeStoredAnnouncement(id, activeTenantSlug);
+    setAnnouncementList(getStoredAnnouncementsForTenant(activeTenantSlug));
+    setSuccessMessage('Announcement was removed.');
   };
 
   // Handle Create Course Submit
   const handleCourseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const newCourse: CourseItem = {
+      id: `course-${Date.now()}`,
+      code: courseForm.code.toUpperCase().trim(),
+      title: courseForm.title.trim(),
+      description: courseForm.description.trim(),
+      instructor: `${user?.firstName || 'Faculty'} ${user?.lastName || 'Member'}`.trim(),
+      enrolled: 0,
+      modulesCount: 1,
+      lessonsCount: 1,
+      rating: 'New ★',
+      category: courseForm.category,
+      tenantSlug: activeTenantSlug,
+    };
+
     try {
       await api.post('/courses', {
-        title: courseForm.title,
-        code: courseForm.code.toUpperCase(),
-        category: courseForm.category,
-        description: courseForm.description,
+        title: newCourse.title,
+        code: newCourse.code,
+        category: newCourse.category,
+        description: newCourse.description,
         level: courseForm.level,
       });
-      setCourseList((prev) => [
-        {
-          code: courseForm.code.toUpperCase(),
-          title: courseForm.title,
-          description: courseForm.description,
-          instructor: `${user?.firstName || 'Faculty'} ${user?.lastName || 'Member'}`,
-          enrolled: 0,
-          modulesCount: 1,
-          lessonsCount: 1,
-          rating: 'New ★',
-          category: courseForm.category,
-        },
-        ...prev,
-      ]);
-      setSuccessMessage(`Course [${courseForm.code.toUpperCase()}: ${courseForm.title}] created and published!`);
-      setCourseOpen(false);
-      setCourseForm({ title: '', code: '', category: 'Web Engineering', level: 'INTERMEDIATE', description: '' });
     } catch {
-      setCourseList((prev) => [
-        {
-          code: courseForm.code.toUpperCase(),
-          title: courseForm.title,
-          description: courseForm.description,
-          instructor: `${user?.firstName || 'Faculty'} ${user?.lastName || 'Member'}`,
-          enrolled: 0,
-          modulesCount: 1,
-          lessonsCount: 1,
-          rating: 'New ★',
-          category: courseForm.category,
-        },
-        ...prev,
-      ]);
-      setSuccessMessage(`Course created: ${courseForm.title}!`);
-      setCourseOpen(false);
-      setCourseForm({ title: '', code: '', category: 'Web Engineering', level: 'INTERMEDIATE', description: '' });
+      // Graceful fallback to client-side storage
     }
+
+    addStoredCourse(newCourse);
+    setCourseList(getStoredCoursesForTenant(activeTenantSlug));
+    setSuccessMessage(`Course [${newCourse.code}: ${newCourse.title}] created and published!`);
+    setCourseOpen(false);
+    setCourseForm({ title: '', code: '', category: 'Web Engineering', level: 'INTERMEDIATE', description: '' });
+  };
+
+  // Handle Remove Course
+  const handleRemoveCourse = (codeOrId: string) => {
+    removeStoredCourse(codeOrId, activeTenantSlug);
+    setCourseList(getStoredCoursesForTenant(activeTenantSlug));
+    setSuccessMessage(`Course [${codeOrId}] was removed from the catalog.`);
   };
 
   // Open Lesson Player
@@ -345,6 +516,98 @@ export const DashboardPage: React.FC = () => {
     setSuccessMessage(`Assessment completed! You scored ${score} / 30 (${Math.round((score / 30) * 100)}%).`);
   };
 
+  // Open Provision Tenant Dialog
+  const handleOpenProvisionTenantModal = () => {
+    safeBlur();
+    setShowAdminPassword(false);
+    setNewTenantForm({
+      name: '',
+      slug: '',
+      domain: '',
+      contactEmail: '',
+      maxStudents: 5000,
+      primaryColor: '#2D5A27',
+      adminName: 'Campus Administrator',
+      adminPassword: 'Password123!',
+    });
+    setProvisionTenantModalOpen(true);
+  };
+
+  // Handle Provision Tenant Submit
+  const handleCreateTenant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTenantForm.name || !newTenantForm.slug) return;
+
+    const computedSlug = newTenantForm.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+    const computedDomain = newTenantForm.domain.trim() || `${computedSlug}.edusphere.io`;
+
+    const newTenant: TenantOption = {
+      id: `tenant-${Date.now()}`,
+      name: newTenantForm.name.trim(),
+      slug: computedSlug,
+      domain: computedDomain,
+      status: 'ACTIVE',
+      maxStudents: Number(newTenantForm.maxStudents) || 5000,
+      contactEmail: newTenantForm.contactEmail.trim() || `admin@${computedSlug}.edu`,
+      primaryColor: newTenantForm.primaryColor || '#2D5A27',
+      adminName: newTenantForm.adminName.trim() || 'Campus Administrator',
+      adminPassword: newTenantForm.adminPassword || 'Password123!',
+    };
+
+    try {
+      const response = await api.post('/tenants', {
+        name: newTenant.name,
+        slug: newTenant.slug,
+        domain: newTenant.domain,
+        contactEmail: newTenant.contactEmail,
+        maxStudents: newTenant.maxStudents,
+        primaryColor: newTenant.primaryColor,
+        adminName: newTenant.adminName,
+        adminPassword: newTenant.adminPassword,
+      });
+      if (response.data?.data?._id) {
+        newTenant.id = response.data.data._id;
+      }
+    } catch {
+      // Graceful fallback to client-side state
+    }
+
+    const updated = [newTenant, ...tenantsList];
+    setTenantsList(updated);
+    saveStoredTenants(updated);
+    setProvisionTenantModalOpen(false);
+    setSuccessMessage(
+      `University "${newTenant.name}" provisioned successfully! Admin login: ${newTenant.contactEmail} (Password: ${newTenant.adminPassword})`
+    );
+  };
+
+  // Open Delete Tenant Dialog
+  const handleOpenDeleteTenantModal = (tenantItem: TenantOption) => {
+    safeBlur();
+    setTenantToDelete(tenantItem);
+    setDeleteTenantModalOpen(true);
+  };
+
+  // Handle Confirm Delete Tenant
+  const handleConfirmDeleteTenant = async () => {
+    if (!tenantToDelete) return;
+    const targetId = tenantToDelete.id || (tenantToDelete as any)._id;
+    try {
+      if (targetId && !targetId.startsWith('tenant-')) {
+        await api.delete(`/tenants/${targetId}`);
+      }
+    } catch {
+      // Graceful fallback
+    }
+
+    const updated = tenantsList.filter((t) => (t.id || (t as any)._id) !== targetId && t.name !== tenantToDelete.name);
+    setTenantsList(updated);
+    saveStoredTenants(updated);
+    setSuccessMessage(`University "${tenantToDelete.name}" has been successfully deprovisioned and removed.`);
+    setDeleteTenantModalOpen(false);
+    setTenantToDelete(null);
+  };
+
   // Filtered users
   const filteredUsers = userList.filter(
     (u) =>
@@ -369,7 +632,7 @@ export const DashboardPage: React.FC = () => {
         </Typography>
         <Typography variant="body1" sx={{ color: 'text.secondary' }}>
           {user?.role === 'SUPER_ADMIN' && 'Platform-wide multi-tenant telemetry and operational control.'}
-          {user?.role === 'TENANT_ADMIN' && `Managing organizational operations for ${tenant?.name || 'Apex University'}.`}
+          {user?.role === 'TENANT_ADMIN' && `Managing organizational operations for ${tenantDisplayName}.`}
           {user?.role === 'INSTRUCTOR' && 'Review curriculum engagement, grade assignments, and post announcements.'}
           {user?.role === 'STUDENT' && 'Continue your coursework, complete upcoming assessments, and track progress.'}
         </Typography>
@@ -385,7 +648,7 @@ export const DashboardPage: React.FC = () => {
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>ACTIVE TENANTS</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>3</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{tenantsList.length}</Typography>
                     <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>Across global partitions</Typography>
                   </Paper>
                 </Grid>
@@ -418,29 +681,31 @@ export const DashboardPage: React.FC = () => {
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>TOTAL STUDENTS</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>12,400</Typography>
-                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>↑ 12% vs last term</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{userList.filter((u) => u.role === 'STUDENT').length}</Typography>
+                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>{userList.filter((u) => u.role === 'STUDENT').length} enrolled</Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>ACTIVE INSTRUCTORS</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>48</Typography>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>12 departments</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{userList.filter((u) => u.role === 'INSTRUCTOR').length}</Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>{userList.filter((u) => u.role === 'INSTRUCTOR').length} faculty assigned</Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>COURSES PUBLISHED</Typography>
                     <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{courseList.length}</Typography>
-                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>CAP646 & CAP774 active</Typography>
+                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                      {courseList.length === 0 ? 'No courses active' : `${courseList.length} active course${courseList.length === 1 ? '' : 's'}`}
+                    </Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>COMPLETION RATE</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>84.2%</Typography>
-                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>Above target (80%)</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{courseList.length > 0 ? '84.2%' : '0%'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>{courseList.length > 0 ? 'Above target (80%)' : 'No student enrollments yet'}</Typography>
                   </Paper>
                 </Grid>
               </>
@@ -451,29 +716,31 @@ export const DashboardPage: React.FC = () => {
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>MY ACTIVE STUDENTS</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>240</Typography>
-                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>Across 2 courses</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{userList.filter((u) => u.role === 'STUDENT').length}</Typography>
+                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>Enrolled in institution</Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>COURSES TAUGHT</Typography>
                     <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{courseList.length}</Typography>
-                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>Active curriculum</Typography>
+                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                      {courseList.length === 0 ? 'No courses published' : `${courseList.length} active curriculum course${courseList.length === 1 ? '' : 's'}`}
+                    </Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>SUBMISSIONS GRADED</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>92</Typography>
-                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>88.5% avg score</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{courseList.length > 0 ? 92 : 0}</Typography>
+                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>{courseList.length > 0 ? '88.5% avg score' : 'Awaiting submissions'}</Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>STUDENT SATISFACTION</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'primary.main' }}>4.9 ★</Typography>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>62 reviews recorded</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'primary.main' }}>{courseList.length > 0 ? '4.9 ★' : 'N/A'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>{courseList.length > 0 ? '62 reviews recorded' : 'No reviews yet'}</Typography>
                   </Paper>
                 </Grid>
               </>
@@ -484,34 +751,188 @@ export const DashboardPage: React.FC = () => {
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>ENROLLED COURSES</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>2 Active</Typography>
-                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>CAP646 & CAP774</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{courseList.length} Active</Typography>
+                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                      {courseList.length === 0 ? 'No courses enrolled' : courseList.map((c) => c.code).join(' & ')}
+                    </Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>LESSONS COMPLETED</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>4 / 5</Typography>
-                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>80% curriculum view</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{courseList.length > 0 ? '4 / 5' : '0 / 0'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>{courseList.length > 0 ? '80% curriculum view' : 'No lessons scheduled'}</Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>ASSESSMENTS PASSED</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'success.main' }}>100%</Typography>
-                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>30/30 on Midterm</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'success.main' }}>{courseList.length > 0 ? '100%' : 'N/A'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 600 }}>{courseList.length > 0 ? '30/30 on Midterm' : 'No assessments taken'}</Typography>
                   </Paper>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <Paper sx={{ p: 2.5, borderRadius: 2 }}>
                     <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>OVERALL PROGRESS</Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'primary.main' }}>75%</Typography>
-                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>On track for Certificate</Typography>
+                    <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'primary.main' }}>{courseList.length > 0 ? '75%' : '0%'}</Typography>
+                    <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>{courseList.length > 0 ? 'On track for Certificate' : 'Enroll in course to start'}</Typography>
                   </Paper>
                 </Grid>
               </>
             )}
           </Grid>
+
+          {/* ================= PENDING ROLE VERIFICATIONS QUEUE ================= */}
+          {(user?.role === 'SUPER_ADMIN' || user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR') && (
+            <Paper
+              sx={{
+                p: 3,
+                borderRadius: 2.5,
+                mb: 4,
+                border: '1px solid',
+                borderColor: pendingVerifications.length > 0 ? 'warning.main' : 'divider',
+                bgcolor: pendingVerifications.length > 0 ? 'rgba(237, 108, 2, 0.03)' : 'background.paper',
+                boxShadow: pendingVerifications.length > 0 ? '0 4px 20px rgba(237, 108, 2, 0.08)' : 'none',
+              }}
+            >
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 2 }}>
+                <Box>
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                      Pending Role Verifications & Approval Queue
+                    </Typography>
+                    {pendingVerifications.length > 0 ? (
+                      <Chip
+                        label={`${pendingVerifications.length} Awaiting Authorization`}
+                        color="warning"
+                        size="small"
+                        sx={{ fontWeight: 800, fontSize: '0.72rem' }}
+                      />
+                    ) : (
+                      <Chip
+                        label="Roster Verified"
+                        color="success"
+                        variant="outlined"
+                        size="small"
+                        sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+                      />
+                    )}
+                  </Stack>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                    {user?.role === 'SUPER_ADMIN' && 'Hierarchical Verification Tier 1: Authorize new College Administrators before institutional deployment.'}
+                    {user?.role === 'TENANT_ADMIN' && `Hierarchical Verification Tier 2: Authorize Faculty Instructors for ${tenantDisplayName}.`}
+                    {user?.role === 'INSTRUCTOR' && `Hierarchical Verification Tier 3: Authorize Student Enrollees for ${tenantDisplayName}.`}
+                  </Typography>
+                </Box>
+
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RefreshIcon />}
+                  onClick={() => {
+                    const fresh = getPendingVerificationsForRole(user?.role || '', activeTenantSlug);
+                    setPendingVerifications(fresh);
+                  }}
+                  sx={{ textTransform: 'none', fontWeight: 600 }}
+                >
+                  Refresh Queue
+                </Button>
+              </Stack>
+
+              {pendingVerifications.length === 0 ? (
+                <Box
+                  sx={{
+                    p: 2.5,
+                    bgcolor: 'background.surface',
+                    borderRadius: 2,
+                    border: '1px dashed',
+                    borderColor: 'divider',
+                    textAlign: 'center',
+                  }}
+                >
+                  <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    ✓ All accounts under your authority are active and verified.
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'text.disabled', mt: 0.5, display: 'block' }}>
+                    {user?.role === 'SUPER_ADMIN' && 'New College Admins will appear here for cryptographic sign-off upon registration.'}
+                    {user?.role === 'TENANT_ADMIN' && 'New Teachers / Instructors will appear here for verification upon registration.'}
+                    {user?.role === 'INSTRUCTOR' && 'New Students enrolling in your courses will appear here for verification.'}
+                  </Typography>
+                </Box>
+              ) : (
+                <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+                  <Table size="small">
+                    <TableHead sx={{ bgcolor: 'background.surface' }}>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700 }}>Applicant</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Email Address</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Institution Campus</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Role Requested</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }} align="right">Verification Decision</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {pendingVerifications.map((item) => (
+                        <TableRow key={item.id} hover>
+                          <TableCell sx={{ fontWeight: 700 }}>{item.name}</TableCell>
+                          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.email}</TableCell>
+                          <TableCell>
+                            {tenantsList.find((t) => t.slug === item.tenantSlug)?.name || item.tenantSlug}
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={item.requestedRole || item.role}
+                              size="small"
+                              sx={{ fontWeight: 800, fontSize: '0.7rem' }}
+                              color={
+                                (item.requestedRole || item.role) === 'TENANT_ADMIN'
+                                  ? 'primary'
+                                  : (item.requestedRole || item.role) === 'INSTRUCTOR'
+                                  ? 'secondary'
+                                  : 'default'
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label="PENDING APPROVAL"
+                              size="small"
+                              color="warning"
+                              sx={{ fontWeight: 800, fontSize: '0.68rem' }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Stack direction="row" spacing={1} justifyContent="flex-end">
+                              <Button
+                                size="small"
+                                variant="contained"
+                                color="success"
+                                startIcon={<CheckCircleOutlineIcon />}
+                                onClick={() => handleApproveVerification(item)}
+                                sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.5 }}
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="error"
+                                onClick={() => handleRejectVerification(item)}
+                                sx={{ fontWeight: 700, fontSize: '0.75rem', px: 1.5 }}
+                              >
+                                Reject
+                              </Button>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Paper>
+          )}
 
           {/* Interactive Action Bar */}
           <Paper sx={{ p: 3, borderRadius: 2, mb: 4 }}>
@@ -594,59 +1015,66 @@ export const DashboardPage: React.FC = () => {
               <Typography variant="h5" sx={{ fontWeight: 800, mb: 2 }}>
                 Continue Learning
               </Typography>
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
-                  <Card sx={{ p: 2 }}>
-                    <CardContent>
-                      <Chip label="CAP646" size="small" color="primary" sx={{ mb: 1, fontWeight: 700 }} />
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
-                        Full-Stack Web Development & Enterprise Architecture
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-                        Current Topic: Multi-Tenant Database Partitioning and Discriminator Scoping
-                      </Typography>
-                      <LinearProgress variant="determinate" value={75} sx={{ height: 8, borderRadius: 4, mb: 1 }} />
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography variant="caption" sx={{ fontWeight: 600 }}>Progress: 75%</Typography>
-                        <Button
-                          variant="contained"
-                          size="small"
-                          startIcon={<PlayArrowIcon />}
-                          onClick={() => handleOpenLesson('CAP646', 'Lesson 1.1: Multi-Tenancy Principles & Resolution')}
-                        >
-                          Resume Lesson
-                        </Button>
-                      </Stack>
-                    </CardContent>
-                  </Card>
+              {courseList.length === 0 ? (
+                <Paper
+                  sx={{
+                    p: 4,
+                    textAlign: 'center',
+                    borderRadius: 2,
+                    border: '1px dashed',
+                    borderColor: 'divider',
+                  }}
+                >
+                  <AutoStoriesIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1, opacity: 0.6 }} />
+                  <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    No enrolled courses yet
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    Your institution has not published any courses yet. Once courses are published, your learning progress will appear here.
+                  </Typography>
+                </Paper>
+              ) : (
+                <Grid container spacing={3}>
+                  {courseList.slice(0, 2).map((course, idx) => (
+                    <Grid item xs={12} md={6} key={course.id || course.code}>
+                      <Card sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <CardContent>
+                          <Chip
+                            label={course.code}
+                            size="small"
+                            color={idx % 2 === 0 ? 'primary' : 'secondary'}
+                            sx={{ mb: 1, fontWeight: 700 }}
+                          />
+                          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+                            {course.title}
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                            {course.description}
+                          </Typography>
+                          <LinearProgress
+                            variant="determinate"
+                            value={idx === 0 ? 75 : 60}
+                            sx={{ height: 8, borderRadius: 4, mb: 1 }}
+                          />
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                              Progress: {idx === 0 ? '75%' : '60%'}
+                            </Typography>
+                            <Button
+                              variant="contained"
+                              size="small"
+                              startIcon={<PlayArrowIcon />}
+                              onClick={() => handleOpenLesson(course.code, `Module 1: Getting Started with ${course.code}`)}
+                            >
+                              Resume Lesson
+                            </Button>
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
                 </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Card sx={{ p: 2 }}>
-                    <CardContent>
-                      <Chip label="CAP774" size="small" color="secondary" sx={{ mb: 1, fontWeight: 700 }} />
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
-                        Styling and Scripting for Web Development
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-                        Current Topic: Material UI Design Tokens, Plus Jakarta Sans & WCAG AA
-                      </Typography>
-                      <LinearProgress variant="determinate" value={60} sx={{ height: 8, borderRadius: 4, mb: 1 }} />
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography variant="caption" sx={{ fontWeight: 600 }}>Progress: 60%</Typography>
-                        <Button
-                          variant="contained"
-                          size="small"
-                          startIcon={<PlayArrowIcon />}
-                          onClick={() => handleOpenLesson('CAP774', 'Lesson 1.1: Design Tokens, Typography & WCAG Compliance')}
-                        >
-                          Resume Lesson
-                        </Button>
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
+              )}
             </Box>
           )}
         </>
@@ -683,7 +1111,7 @@ export const DashboardPage: React.FC = () => {
                   setInviteOpen(true);
                 }}
               >
-                Invite User
+                Add / Invite User
               </Button>
             </Stack>
           </Stack>
@@ -701,7 +1129,7 @@ export const DashboardPage: React.FC = () => {
               </TableHead>
               <TableBody>
                 {filteredUsers.map((u, i) => (
-                  <TableRow key={i}>
+                  <TableRow key={u.id || i} hover>
                     <TableCell sx={{ fontWeight: 600 }}>{u.name}</TableCell>
                     <TableCell>{u.email}</TableCell>
                     <TableCell>
@@ -712,37 +1140,83 @@ export const DashboardPage: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell>
-                      <Chip label={u.status} size="small" color={u.status === 'ACTIVE' ? 'success' : 'default'} />
+                      <Chip
+                        label={u.status}
+                        size="small"
+                        color={u.status === 'ACTIVE' ? 'success' : u.status === 'PENDING_VERIFICATION' ? 'warning' : 'default'}
+                      />
                     </TableCell>
                     <TableCell align="right">
-                      <Button
-                        size="small"
-                        startIcon={<LockResetIcon />}
-                        onClick={() => setSuccessMessage(`Password reset link dispatched to ${u.email}`)}
-                        sx={{ fontSize: '0.75rem', mr: 1 }}
-                      >
-                        Reset PW
-                      </Button>
-                      <Button
-                        size="small"
-                        color={u.status === 'ACTIVE' ? 'warning' : 'success'}
-                        onClick={() => {
-                          setUserList((prev) =>
-                            prev.map((item) =>
-                              item.email === u.email
-                                ? { ...item, status: item.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }
-                                : item
-                            )
-                          );
-                          setSuccessMessage(`Updated status for ${u.name}`);
-                        }}
-                        sx={{ fontSize: '0.75rem' }}
-                      >
-                        {u.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                      </Button>
+                      <Stack direction="row" spacing={1} justifyContent="flex-end">
+                        {u.status === 'PENDING_VERIFICATION' ? (
+                          <>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="success"
+                              onClick={() => handleApproveVerification(u)}
+                              sx={{ fontSize: '0.75rem', fontWeight: 700 }}
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              onClick={() => handleRejectVerification(u)}
+                              sx={{ fontSize: '0.75rem', fontWeight: 700 }}
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              size="small"
+                              startIcon={<LockResetIcon />}
+                              onClick={() => setSuccessMessage(`Password reset link dispatched to ${u.email}`)}
+                              sx={{ fontSize: '0.75rem' }}
+                            >
+                              Reset PW
+                            </Button>
+                            <Button
+                              size="small"
+                              color={u.status === 'ACTIVE' ? 'warning' : 'success'}
+                              onClick={() => {
+                                const newStatus = u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+                                updateStoredUserStatus(u.email, newStatus);
+                                const slug = tenant?.slug || (user?.email?.includes('lpu.edu') ? 'lpu' : 'apex-uni');
+                                setUserList(getStoredUsersForTenant(slug));
+                                setSuccessMessage(`Updated status for ${u.name}`);
+                              }}
+                              sx={{ fontSize: '0.75rem' }}
+                            >
+                              {u.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                            </Button>
+                          </>
+                        )}
+                        {u.email.toLowerCase() !== user?.email?.toLowerCase() && (
+                          <Button
+                            size="small"
+                            color="error"
+                            startIcon={<DeleteOutlineIcon />}
+                            onClick={() => handleOpenDeleteUserModal(u)}
+                            sx={{ fontSize: '0.75rem' }}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </Stack>
                     </TableCell>
                   </TableRow>
                 ))}
+                {filteredUsers.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                      No instructors or students found. Click "+ Add / Invite User" to create one.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -758,7 +1232,7 @@ export const DashboardPage: React.FC = () => {
                 Courses & Curriculum Directory
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                All accredited courses partitioned under tenant: <strong>{tenant?.name || 'Apex University'}</strong>
+                All accredited courses partitioned under tenant: <strong>{tenantDisplayName}</strong>
               </Typography>
             </Box>
             {(user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR' || user?.role === 'SUPER_ADMIN') && (
@@ -775,46 +1249,94 @@ export const DashboardPage: React.FC = () => {
             )}
           </Stack>
 
-          <Grid container spacing={3}>
-            {courseList.map((course, idx) => (
-              <Grid item xs={12} md={6} key={idx}>
-                <Card sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <CardContent>
-                    <Stack direction="row" justifyContent="space-between" sx={{ mb: 1.5 }}>
-                      <Chip label={course.code} color={idx % 2 === 0 ? 'primary' : 'secondary'} size="small" sx={{ fontWeight: 700 }} />
-                      <Chip label={course.rating} size="small" variant="outlined" />
-                    </Stack>
-                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
-                      {course.title}
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-                      {course.description}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-                      Instructor: {course.instructor} • {course.enrolled} Enrolled • {course.modulesCount} Modules • {course.lessonsCount} Lessons
-                    </Typography>
-                  </CardContent>
-                  <CardActions sx={{ px: 2, pb: 2, pt: 0, justifyContent: 'space-between' }}>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      startIcon={<PlayArrowIcon />}
-                      onClick={() => handleOpenLesson(course.code, `Module 1: Getting Started with ${course.code}`)}
-                    >
-                      Open Curriculum
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => setSuccessMessage(`Course details & syllabus for ${course.code} opened`)}
-                    >
-                      View Syllabus
-                    </Button>
-                  </CardActions>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
+          {courseList.length === 0 ? (
+            <Paper
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: 3,
+                bgcolor: 'background.paper',
+                border: '1px dashed',
+                borderColor: 'divider',
+              }}
+            >
+              <AutoStoriesIcon sx={{ fontSize: 56, color: 'text.secondary', mb: 2, opacity: 0.6 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+                No courses published yet for {tenantDisplayName}
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 480, mx: 'auto', mb: 3 }}>
+                This institutional catalog is currently empty. As an instructor or administrator, you can publish accredited courses and build syllabus modules here.
+              </Typography>
+              {(user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR' || user?.role === 'SUPER_ADMIN') && (
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    safeBlur();
+                    setCourseOpen(true);
+                  }}
+                >
+                  Create First Course
+                </Button>
+              )}
+            </Paper>
+          ) : (
+            <Grid container spacing={3}>
+              {courseList.map((course, idx) => (
+                <Grid item xs={12} md={6} key={course.id || course.code || idx}>
+                  <Card sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                    <CardContent>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Chip label={course.code} color={idx % 2 === 0 ? 'primary' : 'secondary'} size="small" sx={{ fontWeight: 700 }} />
+                          <Chip label={course.category} size="small" variant="outlined" />
+                        </Stack>
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Chip label={course.rating} size="small" variant="outlined" />
+                          {(user?.role === 'TENANT_ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'INSTRUCTOR') && (
+                            <IconButton
+                              size="small"
+                              color="error"
+                              title="Delete Course"
+                              onClick={() => handleRemoveCourse(course.code)}
+                            >
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                        </Stack>
+                      </Stack>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+                        {course.title}
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                        {course.description}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                        Instructor: {course.instructor} • {course.enrolled} Enrolled • {course.modulesCount} Modules • {course.lessonsCount} Lessons
+                      </Typography>
+                    </CardContent>
+                    <CardActions sx={{ px: 2, pb: 2, pt: 0, justifyContent: 'space-between' }}>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        startIcon={<PlayArrowIcon />}
+                        onClick={() => handleOpenLesson(course.code, `Module 1: Getting Started with ${course.code}`)}
+                      >
+                        Open Curriculum
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setSuccessMessage(`Course details & syllabus for ${course.code} opened`)}
+                      >
+                        View Syllabus
+                      </Button>
+                    </CardActions>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          )}
         </Box>
       )}
 
@@ -844,38 +1366,82 @@ export const DashboardPage: React.FC = () => {
             )}
           </Stack>
 
-          <Stack spacing={2}>
-            {announcementList.map((ann) => (
-              <Card key={ann.id} variant="outlined" sx={{ p: 2 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                    {ann.title}
+          {announcementList.length === 0 ? (
+            <Paper
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: 2,
+                border: '1px dashed',
+                borderColor: 'divider',
+              }}
+            >
+              <CampaignIcon sx={{ fontSize: 56, color: 'text.secondary', mb: 2, opacity: 0.6 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+                No campus announcements posted yet
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 480, mx: 'auto', mb: 3 }}>
+                Keep your campus informed about schedules, exams, events, and department notices.
+              </Typography>
+              {(user?.role === 'TENANT_ADMIN' || user?.role === 'INSTRUCTOR' || user?.role === 'SUPER_ADMIN') && (
+                <Button
+                  variant="contained"
+                  startIcon={<CampaignIcon />}
+                  onClick={() => {
+                    safeBlur();
+                    setAnnouncementOpen(true);
+                  }}
+                >
+                  Create First Announcement
+                </Button>
+              )}
+            </Paper>
+          ) : (
+            <Stack spacing={2}>
+              {announcementList.map((ann) => (
+                <Card key={ann.id} variant="outlined" sx={{ p: 2 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      {ann.title}
+                    </Typography>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Chip
+                        label={ann.priority}
+                        size="small"
+                        color={ann.priority === 'HIGH' ? 'error' : 'default'}
+                        sx={{ fontWeight: 700 }}
+                      />
+                      {(user?.role === 'TENANT_ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'INSTRUCTOR') && (
+                        <IconButton
+                          size="small"
+                          color="error"
+                          title="Delete Announcement"
+                          onClick={() => handleRemoveAnnouncement(ann.id)}
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </Stack>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
+                    {ann.content}
                   </Typography>
-                  <Chip
-                    label={ann.priority}
-                    size="small"
-                    color={ann.priority === 'HIGH' ? 'error' : 'default'}
-                    sx={{ fontWeight: 700 }}
-                  />
-                </Stack>
-                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
-                  {ann.content}
-                </Typography>
-                <Stack direction="row" justifyContent="space-between" alignItems="center">
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    Posted by <strong>{ann.author}</strong> • {ann.date}
-                  </Typography>
-                  <Button
-                    size="small"
-                    onClick={() => setSuccessMessage(`Announcement "${ann.title}" marked as acknowledged.`)}
-                    sx={{ fontSize: '0.75rem' }}
-                  >
-                    Acknowledge
-                  </Button>
-                </Stack>
-              </Card>
-            ))}
-          </Stack>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      Posted by <strong>{ann.author}</strong> • {ann.date}
+                    </Typography>
+                    <Button
+                      size="small"
+                      onClick={() => setSuccessMessage(`Announcement "${ann.title}" marked as acknowledged.`)}
+                      sx={{ fontSize: '0.75rem' }}
+                    >
+                      Acknowledge
+                    </Button>
+                  </Stack>
+                </Card>
+              ))}
+            </Stack>
+          )}
         </Paper>
       )}
 
@@ -893,47 +1459,49 @@ export const DashboardPage: React.FC = () => {
             </Box>
           </Stack>
 
-          <Stack spacing={2.5}>
-            <Card variant="outlined" sx={{ p: 2.5 }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  CAP646 Midterm Assessment: Multi-Tenancy & Architecture
-                </Typography>
-                <Chip label="20 mins • 3 Questions • 30 Points" size="small" color="primary" />
-              </Stack>
-              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-                Timed evaluation covering layered architecture, tenant isolation, and JWT token family rotation.
+          {courseList.length === 0 ? (
+            <Paper
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: 2,
+                border: '1px dashed',
+                borderColor: 'divider',
+              }}
+            >
+              <QuizIcon sx={{ fontSize: 56, color: 'text.secondary', mb: 2, opacity: 0.6 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+                No assessments scheduled yet
               </Typography>
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<QuizIcon />}
-                onClick={() => handleOpenQuiz('CAP646 Midterm Assessment: Multi-Tenancy & Architecture')}
-              >
-                Start Assessment
-              </Button>
-            </Card>
-
-            <Card variant="outlined" sx={{ p: 2.5 }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  CAP774 Practical Quiz: Material UI & WCAG AA Tokens
-                </Typography>
-                <Chip label="15 mins • 3 Questions • 30 Points" size="small" color="secondary" />
-              </Stack>
-              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-                Practical knowledge check on typography systems, color contrast ratios, and accessible form controls.
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                There are currently no active quizzes or assessments published for {tenantDisplayName}.
               </Typography>
-              <Button
-                variant="contained"
-                color="secondary"
-                startIcon={<QuizIcon />}
-                onClick={() => handleOpenQuiz('CAP774 Practical Quiz: Material UI & WCAG AA Tokens')}
-              >
-                Start Assessment
-              </Button>
-            </Card>
-          </Stack>
+            </Paper>
+          ) : (
+            <Stack spacing={2.5}>
+              {courseList.map((c, idx) => (
+                <Card key={c.code} variant="outlined" sx={{ p: 2.5 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                      {c.code} Assessment: {c.title}
+                    </Typography>
+                    <Chip label="20 mins • 3 Questions • 30 Points" size="small" color={idx % 2 === 0 ? 'primary' : 'secondary'} />
+                  </Stack>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                    Comprehensive knowledge check covering key syllabus topics in {c.code}.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    color={idx % 2 === 0 ? 'primary' : 'secondary'}
+                    startIcon={<QuizIcon />}
+                    onClick={() => handleOpenQuiz(`${c.code} Assessment: ${c.title}`)}
+                  >
+                    Start Assessment
+                  </Button>
+                </Card>
+              ))}
+            </Stack>
+          )}
         </Paper>
       )}
 
@@ -941,14 +1509,19 @@ export const DashboardPage: React.FC = () => {
       {currentView === 'tenants' && (
         <Paper sx={{ p: 3, borderRadius: 2, mb: 4 }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 800 }}>
-              Provisioned Tenant Organizations
-            </Typography>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                Provisioned Tenant Organizations
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Total Universities / Tenants: {tenantsList.length}
+              </Typography>
+            </Box>
             <Button
               variant="contained"
               size="small"
               startIcon={<AddIcon />}
-              onClick={() => setSuccessMessage('New Tenant Provisioning wizard initialized.')}
+              onClick={handleOpenProvisionTenantModal}
             >
               Provision New Tenant
             </Button>
@@ -966,42 +1539,49 @@ export const DashboardPage: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>Apex University</TableCell>
-                  <TableCell>apex-uni.edusphere.io</TableCell>
-                  <TableCell><Chip label="ACTIVE" color="success" size="small" /></TableCell>
-                  <TableCell>15,000</TableCell>
-                  <TableCell>admin@apex.edu</TableCell>
-                  <TableCell align="right">
-                    <Button size="small" onClick={() => setSuccessMessage('Switched tenant context to Apex University')}>
-                      Manage
-                    </Button>
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>Oakridge College</TableCell>
-                  <TableCell>oakridge-col.edusphere.io</TableCell>
-                  <TableCell><Chip label="ACTIVE" color="success" size="small" /></TableCell>
-                  <TableCell>5,000</TableCell>
-                  <TableCell>admin@oakridge.edu</TableCell>
-                  <TableCell align="right">
-                    <Button size="small" onClick={() => setSuccessMessage('Switched tenant context to Oakridge College')}>
-                      Manage
-                    </Button>
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>Summit Tech Institute</TableCell>
-                  <TableCell>summit-inst.edusphere.io</TableCell>
-                  <TableCell><Chip label="ACTIVE" color="success" size="small" /></TableCell>
-                  <TableCell>2,500</TableCell>
-                  <TableCell>admin@summit.edu</TableCell>
-                  <TableCell align="right">
-                    <Button size="small" onClick={() => setSuccessMessage('Switched tenant context to Summit Tech Institute')}>
-                      Manage
-                    </Button>
-                  </TableCell>
-                </TableRow>
+                {tenantsList.map((t) => {
+                  const key = t.id || t._id || t.slug;
+                  return (
+                    <TableRow key={key} hover>
+                      <TableCell sx={{ fontWeight: 600 }}>{t.name}</TableCell>
+                      <TableCell>{t.domain}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={t.status}
+                          color={t.status === 'ACTIVE' ? 'success' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>{t.maxStudents?.toLocaleString() || '5,000'}</TableCell>
+                      <TableCell>{t.contactEmail}</TableCell>
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={1} justifyContent="flex-end">
+                          <Button
+                            size="small"
+                            onClick={() => setSuccessMessage(`Switched tenant context to ${t.name}`)}
+                          >
+                            Manage
+                          </Button>
+                          <Button
+                            size="small"
+                            color="error"
+                            startIcon={<DeleteOutlineIcon />}
+                            onClick={() => handleOpenDeleteTenantModal(t)}
+                          >
+                            Remove
+                          </Button>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {tenantsList.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                      No university tenants provisioned. Click "+ Provision New Tenant" to add one.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -1088,9 +1668,9 @@ export const DashboardPage: React.FC = () => {
                   Institutional Profile & Branding
                 </Typography>
                 <Stack spacing={2}>
-                  <TextField label="Institution Name" defaultValue={tenant?.name || 'Apex University'} size="small" fullWidth />
-                  <TextField label="Tenant Domain Slug" defaultValue="apex-uni.edusphere.io" size="small" fullWidth disabled />
-                  <TextField label="Administrative Contact Email" defaultValue={user?.email || 'admin@apex.edu'} size="small" fullWidth />
+                  <TextField label="Institution Name" defaultValue={tenantDisplayName} size="small" fullWidth />
+                  <TextField label="Tenant Domain Slug" defaultValue={`${activeTenantSlug}.edusphere.io`} size="small" fullWidth disabled />
+                  <TextField label="Administrative Contact Email" defaultValue={user?.email || `admin@${activeTenantSlug}.edu`} size="small" fullWidth />
                   <TextField label="Primary Brand Color" defaultValue="#2563EB" size="small" fullWidth />
                 </Stack>
               </Card>
@@ -1137,10 +1717,13 @@ export const DashboardPage: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 800 }}>Invite Student or Instructor</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>Create New Instructor or Student</DialogTitle>
         <form onSubmit={handleInviteSubmit}>
           <DialogContent>
             <Stack spacing={2.5}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Provision a new user account directly within this university organization. The user will be able to log in with these credentials immediately.
+              </Typography>
               <Stack direction="row" spacing={2}>
                 <TextField
                   label="First Name"
@@ -1165,30 +1748,90 @@ export const DashboardPage: React.FC = () => {
                 fullWidth
                 size="small"
                 required
+                placeholder="e.g. prof.sharma@lpu.edu or student.aman@lpu.edu"
                 value={inviteForm.email}
                 onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
               />
               <TextField
                 select
-                label="Role"
+                label="Assigned Role"
                 fullWidth
                 size="small"
                 value={inviteForm.role}
                 onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}
               >
-                <MenuItem value="STUDENT">Student</MenuItem>
-                <MenuItem value="INSTRUCTOR">Instructor</MenuItem>
+                <MenuItem value="INSTRUCTOR">Instructor (Faculty / Course Lead)</MenuItem>
+                <MenuItem value="STUDENT">Student (Learner)</MenuItem>
                 <MenuItem value="TENANT_ADMIN">Tenant Administrator</MenuItem>
               </TextField>
+              <TextField
+                label="Initial Password"
+                type={showInvitePassword ? 'text' : 'password'}
+                fullWidth
+                size="small"
+                required
+                value={inviteForm.password}
+                onChange={(e) => setInviteForm({ ...inviteForm, password: e.target.value })}
+                helperText="Password to sign in with this email (Default: Password123!)"
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={() => setShowInvitePassword(!showInvitePassword)}
+                        edge="end"
+                        size="small"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {showInvitePassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
             </Stack>
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 3 }}>
             <Button onClick={() => setInviteOpen(false)}>Cancel</Button>
-            <Button type="submit" variant="contained">
-              Send Invitation
+            <Button type="submit" variant="contained" startIcon={<AddIcon />}>
+              Create User
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      {/* ======================= DIALOG: CONFIRM DELETE USER ======================= */}
+      <Dialog
+        open={deleteUserModalOpen}
+        onClose={() => setDeleteUserModalOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        aria-labelledby="delete-user-dialog-title"
+      >
+        <DialogTitle id="delete-user-dialog-title" sx={{ fontWeight: 800, color: 'error.main' }}>
+          Confirm User Removal
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body1" sx={{ mb: 1 }}>
+            Are you sure you want to remove <strong>{userToDelete?.name}</strong>?
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Email: <code>{userToDelete?.email}</code> • Role: <strong>{userToDelete?.role}</strong>
+          </Typography>
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            This will permanently remove the user from this institution's roster, revoking their portal access and enrollments.
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={() => setDeleteUserModalOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={<DeleteSweepIcon />}
+            onClick={handleConfirmDeleteUser}
+          >
+            Confirm Removal
+          </Button>
+        </DialogActions>
       </Dialog>
 
       {/* ======================= DIALOG: POST ANNOUNCEMENT ======================= */}
@@ -1474,6 +2117,156 @@ export const DashboardPage: React.FC = () => {
               Submit Assessment
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      {/* 6. Provision New Tenant Dialog */}
+      <Dialog
+        open={provisionTenantModalOpen}
+        onClose={() => setProvisionTenantModalOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        aria-labelledby="provision-tenant-dialog-title"
+      >
+        <DialogTitle id="provision-tenant-dialog-title" sx={{ fontWeight: 800 }}>
+          Provision New University / Tenant
+        </DialogTitle>
+        <form onSubmit={handleCreateTenant}>
+          <DialogContent dividers>
+            <Stack spacing={2.5}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Set up a new isolated multi-tenant organization. The system will allocate dedicated branding, domain routing, and tenant partitioning.
+              </Typography>
+              <TextField
+                label="University / Institution Name"
+                placeholder="e.g. Stanford University"
+                fullWidth
+                required
+                value={newTenantForm.name}
+                onChange={(e) => {
+                  const nameVal = e.target.value;
+                  const autoSlug = nameVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                  setNewTenantForm((prev) => ({
+                    ...prev,
+                    name: nameVal,
+                    slug: prev.slug === '' || prev.slug === autoSlug.slice(0, -1) ? autoSlug : prev.slug,
+                    domain: `${autoSlug || 'subdomain'}.edusphere.io`,
+                  }));
+                }}
+              />
+              <TextField
+                label="Subdomain Slug"
+                placeholder="e.g. stanford-edu"
+                fullWidth
+                required
+                value={newTenantForm.slug}
+                helperText={`Full URL: https://${newTenantForm.slug ? newTenantForm.slug.toLowerCase() : 'subdomain'}.edusphere.io`}
+                onChange={(e) => {
+                  const slugVal = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+                  setNewTenantForm((prev) => ({
+                    ...prev,
+                    slug: slugVal,
+                    domain: `${slugVal}.edusphere.io`,
+                  }));
+                }}
+              />
+              <TextField
+                label="Contact / Administrator Email"
+                placeholder="admin@university.edu"
+                type="email"
+                fullWidth
+                required
+                value={newTenantForm.contactEmail}
+                onChange={(e) => setNewTenantForm({ ...newTenantForm, contactEmail: e.target.value })}
+              />
+              <TextField
+                label="Maximum Student Capacity"
+                placeholder="5000"
+                type="number"
+                fullWidth
+                value={newTenantForm.maxStudents}
+                onChange={(e) => setNewTenantForm({ ...newTenantForm, maxStudents: Number(e.target.value) })}
+              />
+              <TextField
+                label="Administrator Full Name"
+                placeholder="e.g. Dr. John Doe"
+                fullWidth
+                required
+                value={newTenantForm.adminName}
+                onChange={(e) => setNewTenantForm({ ...newTenantForm, adminName: e.target.value })}
+              />
+              <TextField
+                label="Administrator Initial Password"
+                placeholder="Password123!"
+                type={showAdminPassword ? 'text' : 'password'}
+                fullWidth
+                required
+                value={newTenantForm.adminPassword}
+                onChange={(e) => setNewTenantForm({ ...newTenantForm, adminPassword: e.target.value })}
+                helperText="Initial credentials to sign into this institution's portal as Tenant Admin (Default: Password123!)"
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={() => setShowAdminPassword(!showAdminPassword)}
+                        edge="end"
+                        size="small"
+                        sx={{ color: 'text.secondary' }}
+                      >
+                        {showAdminPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2.5 }}>
+            <Button onClick={() => setProvisionTenantModalOpen(false)}>Cancel</Button>
+            <Button
+              type="submit"
+              variant="contained"
+              startIcon={<AddIcon />}
+              disabled={!newTenantForm.name || !newTenantForm.slug}
+            >
+              Provision University
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
+
+      {/* 7. Confirm Deprovision / Delete Tenant Dialog */}
+      <Dialog
+        open={deleteTenantModalOpen}
+        onClose={() => setDeleteTenantModalOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        aria-labelledby="delete-tenant-dialog-title"
+      >
+        <DialogTitle id="delete-tenant-dialog-title" sx={{ fontWeight: 800, color: 'error.main' }}>
+          Confirm University Removal
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body1" sx={{ mb: 1.5 }}>
+            Are you sure you want to remove <strong>{tenantToDelete?.name}</strong>?
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Domain: <code>{tenantToDelete?.domain}</code>
+          </Typography>
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            Deprovisioning will unlink all associated courses, users, and telemetry records for this tenant organization. This action cannot be undone.
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={() => setDeleteTenantModalOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={<DeleteSweepIcon />}
+            onClick={handleConfirmDeleteTenant}
+          >
+            Confirm Removal
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

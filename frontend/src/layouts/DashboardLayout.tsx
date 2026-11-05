@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -21,6 +21,7 @@ import {
   useMediaQuery,
   useTheme,
   Popover,
+  Menu,
   MenuItem,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -39,6 +40,7 @@ import InsightsIcon from '@mui/icons-material/Insights';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAppDispatch, useAppSelector } from '../store/index.js';
 import { logout } from '../store/slices/authSlice.js';
+import { getPendingVerificationsForRole, USERS_CHANGED_EVENT } from '../services/userStorage.js';
 
 const DRAWER_WIDTH = 260;
 
@@ -51,6 +53,19 @@ export const DashboardLayout: React.FC = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const dispatch = useAppDispatch();
   const { user, tenant } = useAppSelector((state) => state.auth);
+
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    const updatePending = () => {
+      const list = getPendingVerificationsForRole(user.role, user.tenantId);
+      setPendingCount(list.length);
+    };
+    updatePending();
+    window.addEventListener(USERS_CHANGED_EVENT, updatePending);
+    return () => window.removeEventListener(USERS_CHANGED_EVENT, updatePending);
+  }, [user]);
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsAnchor, setNotificationsAnchor] = useState<null | HTMLElement>(null);
@@ -89,12 +104,28 @@ export const DashboardLayout: React.FC = () => {
     if (isMobile) setMobileOpen(false);
   };
 
+  const handleOpenNotifications = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    setNotificationsAnchor(notificationsAnchor ? null : event.currentTarget);
+  };
+
+  const handleCloseNotifications = () => {
+    setNotificationsAnchor(null);
+  };
+
+  const handleNotificationClick = (id: number) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+    setNotificationsAnchor(null);
+  };
+
   const handleMarkAllRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     setNotificationsAnchor(null);
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = notifications.filter((n) => !n.read).length + pendingCount;
 
   // Role-tailored Navigation Items with distinct views
   const getNavItems = () => {
@@ -119,7 +150,7 @@ export const DashboardLayout: React.FC = () => {
           { text: 'Instructor Hub', icon: <DashboardIcon />, view: 'overview' },
           { text: 'Course Builder', icon: <AutoStoriesIcon />, view: 'courses' },
           { text: 'Quiz Authoring', icon: <QuizIcon />, view: 'quizzes' },
-          { text: 'Grading Center', icon: <GradeIcon />, view: 'users' },
+          { text: 'Grading Center', icon: <GradeIcon />, view: 'grading' },
           { text: 'Announcements', icon: <CampaignIcon />, view: 'announcements' },
         ];
       case 'STUDENT':
@@ -194,22 +225,60 @@ export const DashboardLayout: React.FC = () => {
                 onClick={() => handleSelectView(item.view)}
                 sx={{
                   borderRadius: 2,
+                  py: 1.1,
+                  px: 2,
+                  color: isSelected ? '#FFFFFF' : 'text.primary',
                   '&.Mui-selected': {
                     bgcolor: 'primary.main',
-                    color: 'primary.contrastText',
-                    '& .MuiListItemIcon-root': {
-                      color: 'primary.contrastText',
+                    color: '#FFFFFF !important',
+                    '& .MuiListItemText-primary': {
+                      color: '#FFFFFF !important',
                     },
+                    '& .MuiListItemIcon-root': {
+                      color: '#FFFFFF !important',
+                    },
+                    '&:hover': {
+                      bgcolor: 'primary.dark',
+                      color: '#FFFFFF !important',
+                      '& .MuiListItemText-primary': {
+                        color: '#FFFFFF !important',
+                      },
+                      '& .MuiListItemIcon-root': {
+                        color: '#FFFFFF !important',
+                      },
+                    },
+                  },
+                  '&:hover': {
+                    bgcolor: isSelected ? 'primary.dark' : 'rgba(72, 90, 50, 0.08)',
                   },
                 }}
               >
-                <ListItemIcon sx={{ minWidth: 40, color: isSelected ? 'inherit' : 'text.secondary' }}>
+                <ListItemIcon sx={{ minWidth: 38, color: isSelected ? '#FFFFFF' : 'text.secondary' }}>
                   {item.icon}
                 </ListItemIcon>
                 <ListItemText
                   primary={item.text}
-                  primaryTypographyProps={{ fontWeight: 600, fontSize: '0.9rem' }}
+                  primaryTypographyProps={{
+                    fontWeight: isSelected ? 700 : 600,
+                    fontSize: '0.92rem',
+                    color: isSelected ? '#FFFFFF' : 'inherit',
+                  }}
                 />
+                {item.view === 'overview' && pendingCount > 0 && (
+                  <Chip
+                    label={`${pendingCount} pending`}
+                    size="small"
+                    sx={{
+                      height: 20,
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      bgcolor: isSelected ? '#FFFFFF' : '#D97706',
+                      color: isSelected ? 'primary.main' : '#FFFFFF',
+                      letterSpacing: '0.02em',
+                      boxShadow: '0 2px 6px rgba(217, 119, 6, 0.35)',
+                    }}
+                  />
+                )}
               </ListItemButton>
             </ListItem>
           );
@@ -294,59 +363,155 @@ export const DashboardLayout: React.FC = () => {
 
           <Stack direction="row" spacing={2} alignItems="center">
             <IconButton
+              id="notifications-button"
+              aria-controls={Boolean(notificationsAnchor) ? 'notifications-menu' : undefined}
+              aria-haspopup="true"
+              aria-expanded={Boolean(notificationsAnchor) ? 'true' : undefined}
               color="inherit"
-              size="small"
-              onClick={(e) => setNotificationsAnchor(e.currentTarget)}
+              size="medium"
+              onClick={handleOpenNotifications}
+              sx={{
+                p: 1,
+                cursor: 'pointer',
+                borderRadius: 2,
+                transition: 'background-color 0.2s',
+                '&:hover': {
+                  bgcolor: 'rgba(72, 90, 50, 0.08)',
+                },
+              }}
             >
-              <Badge badgeContent={unreadCount} color="error">
-                <NotificationsIcon />
+              <Badge badgeContent={unreadCount} color="error" max={99}>
+                <NotificationsIcon sx={{ fontSize: 24 }} />
               </Badge>
             </IconButton>
 
-            {/* Notifications Popover Menu */}
-            <Popover
-              open={Boolean(notificationsAnchor)}
+            {/* Notifications Dropdown Menu */}
+            <Menu
+              id="notifications-menu"
               anchorEl={notificationsAnchor}
-              onClose={() => setNotificationsAnchor(null)}
-              disableRestoreFocus
+              open={Boolean(notificationsAnchor)}
+              onClose={handleCloseNotifications}
+              onClick={(e) => e.stopPropagation()}
               anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
               transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-              PaperProps={{ sx: { width: 340, p: 2, borderRadius: 2 } }}
+              slotProps={{
+                paper: {
+                  sx: {
+                    width: 360,
+                    maxWidth: '92vw',
+                    p: 1.5,
+                    borderRadius: 2.5,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    boxShadow: '0 12px 32px rgba(26, 34, 24, 0.14)',
+                    mt: 1.2,
+                  },
+                },
+              }}
             >
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                  Notifications ({unreadCount})
-                </Typography>
-                <Button size="small" onClick={handleMarkAllRead} sx={{ fontSize: '0.75rem' }}>
-                  Mark all as read
-                </Button>
-              </Stack>
+              <Box sx={{ px: 1, py: 0.5, mb: 1 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                    Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}
+                  </Typography>
+                  {unreadCount > 0 && (
+                    <Button
+                      size="small"
+                      onClick={handleMarkAllRead}
+                      sx={{ fontSize: '0.72rem', textTransform: 'none', py: 0.2, fontWeight: 700 }}
+                    >
+                      Mark all as read
+                    </Button>
+                  )}
+                </Stack>
+              </Box>
               <Divider sx={{ mb: 1 }} />
-              {notifications.map((n) => (
+              {pendingCount > 0 && (
                 <MenuItem
-                  key={n.id}
-                  onClick={() => setNotificationsAnchor(null)}
+                  onClick={() => {
+                    handleSelectView('overview');
+                    setNotificationsAnchor(null);
+                  }}
                   sx={{
                     borderRadius: 1.5,
                     mb: 1,
                     p: 1.2,
-                    bgcolor: n.read ? 'transparent' : 'rgba(37, 99, 235, 0.05)',
+                    whiteSpace: 'normal',
+                    bgcolor: 'rgba(217, 119, 6, 0.1)',
+                    border: '1px solid rgba(217, 119, 6, 0.3)',
+                    '&:hover': {
+                      bgcolor: 'rgba(217, 119, 6, 0.18)',
+                    },
                   }}
                 >
-                  <Stack spacing={0.5} sx={{ width: '100%' }}>
+                  <Stack spacing={0.3} sx={{ width: '100%' }}>
                     <Stack direction="row" spacing={1} alignItems="center">
-                      {!n.read && <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main' }} />}
-                      <Typography variant="body2" sx={{ fontWeight: n.read ? 500 : 700 }}>
-                        {n.title}
-                      </Typography>
+                      <Chip label="ACTION REQUIRED" size="small" color="warning" sx={{ height: 18, fontSize: '0.62rem', fontWeight: 800 }} />
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>Live Queue</Typography>
                     </Stack>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', pl: n.read ? 0 : 2 }}>
-                      {n.time}
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                      {pendingCount} new account role verification request{pendingCount > 1 ? 's' : ''} awaiting your approval.
                     </Typography>
                   </Stack>
                 </MenuItem>
-              ))}
-            </Popover>
+              )}
+              {notifications.length === 0 ? (
+                <Box sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    No notifications yet.
+                  </Typography>
+                </Box>
+              ) : (
+                notifications.map((n) => (
+                  <MenuItem
+                    key={n.id}
+                    onClick={() => handleNotificationClick(n.id)}
+                    sx={{
+                      borderRadius: 1.5,
+                      mb: 0.8,
+                      p: 1.2,
+                      whiteSpace: 'normal',
+                      bgcolor: n.read ? 'transparent' : 'rgba(72, 90, 50, 0.08)',
+                      '&:hover': {
+                        bgcolor: n.read ? 'rgba(72, 90, 50, 0.04)' : 'rgba(72, 90, 50, 0.14)',
+                      },
+                    }}
+                  >
+                    <Stack spacing={0.5} sx={{ width: '100%' }}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        {!n.read && (
+                          <Box
+                            sx={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: '50%',
+                              bgcolor: 'primary.main',
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: n.read ? 500 : 700,
+                            color: 'text.primary',
+                            lineHeight: 1.3,
+                          }}
+                        >
+                          {n.title}
+                        </Typography>
+                      </Stack>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.secondary', pl: n.read ? 0 : 2 }}
+                      >
+                        {n.time}
+                      </Typography>
+                    </Stack>
+                  </MenuItem>
+                ))
+              )}
+            </Menu>
 
             <Divider orientation="vertical" flexItem sx={{ height: 24, alignSelf: 'center' }} />
 

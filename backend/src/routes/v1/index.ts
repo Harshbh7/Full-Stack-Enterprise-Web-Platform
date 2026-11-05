@@ -1,14 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { sendSuccess } from '../../utils/response.util.js';
 import { redis } from '../../config/redis.js';
+import { apiRateLimiter } from '../../middleware/rateLimit.middleware.js';
 import mongoose from 'mongoose';
 import authRoutes from './auth.routes.js';
 import tenantRoutes from './tenant.routes.js';
 import userRoutes from './user.routes.js';
 import courseRoutes from './course.routes.js';
 import announcementRoutes from './announcement.routes.js';
+import quizRoutes from './quiz.routes.js';
 
 const router = Router();
+
+// Apply global API rate limiter
+router.use(apiRateLimiter);
 
 // Mount Sub-routers
 router.use('/auth', authRoutes);
@@ -16,6 +21,7 @@ router.use('/tenants', tenantRoutes);
 router.use('/users', userRoutes);
 router.use('/courses', courseRoutes);
 router.use('/announcements', announcementRoutes);
+router.use('/quizzes', quizRoutes);
 
 // Health check endpoint (Used by Docker, CI/CD, and monitoring)
 router.get('/healthz', async (_req: Request, res: Response) => {

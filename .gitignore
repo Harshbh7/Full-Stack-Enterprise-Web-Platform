@@ -50,3 +50,6 @@ test-results/
 .cache/
 tmp/
 scratch/
+.vite/
+.playwright-mcp/
+*.png

@@ -1,0 +1,275 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EduSphere Enterprise LMS API",
+    "version": "1.0.0",
+    "description": "CAP646 & CAP774 Enterprise Multi-Tenant Learning Management Platform API Specification"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000/api/v1",
+      "description": "Local Development Server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your JWT Bearer token"
+      },
+      "tenantHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Tenant-ID",
+        "description": "Tenant ObjectId or unique subdomain slug"
+      }
+    },
+    "schemas": {
+      "ApiResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "message": { "type": "string" },
+          "data": { "type": "object" },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "total": { "type": "number" },
+              "page": { "type": "number" },
+              "limit": { "type": "number" },
+              "totalPages": { "type": "number" },
+              "hasNext": { "type": "boolean" },
+              "hasPrev": { "type": "boolean" }
+            }
+          },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email", "example": "admin@apex.edu" },
+          "password": { "type": "string", "example": "Password123!" },
+          "tenantSlug": { "type": "string", "example": "apex-uni" }
+        }
+      },
+      "Course": {
+        "type": "object",
+        "properties": {
+          "_id": { "type": "string" },
+          "tenantId": { "type": "string" },
+          "title": { "type": "string", "example": "Advanced Cloud Engineering & Microservices" },
+          "code": { "type": "string", "example": "CS-401" },
+          "slug": { "type": "string" },
+          "category": { "type": "string", "example": "Cloud & Infrastructure" },
+          "level": { "type": "string", "enum": ["BEGINNER", "INTERMEDIATE", "ADVANCED"] },
+          "status": { "type": "string", "enum": ["DRAFT", "PUBLISHED", "ARCHIVED"] }
+        }
+      },
+      "QuizSubmission": {
+        "type": "object",
+        "required": ["answers"],
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["questionId", "selectedOptionIds"],
+              "properties": {
+                "questionId": { "type": "string" },
+                "selectedOptionIds": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Authenticate user and issue JWT access and refresh tokens",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Authenticated successfully" },
+          "401": { "description": "Invalid credentials" }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refresh access token using rotate-on-use refresh token",
+        "responses": {
+          "200": { "description": "Token refreshed" },
+          "401": { "description": "Invalid or revoked refresh token" }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get authenticated user profile",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Profile data" }
+        }
+      }
+    },
+    "/courses": {
+      "get": {
+        "tags": ["Courses"],
+        "summary": "List tenant-scoped courses with server-side pagination and caching",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 10 } },
+          { "name": "search", "in": "query", "schema": { "type": "string" } },
+          { "name": "category", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "List of courses" }
+        }
+      },
+      "post": {
+        "tags": ["Courses"],
+        "summary": "Create new course in active tenant",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "201": { "description": "Course created" }
+        }
+      }
+    },
+    "/courses/{id}": {
+      "get": {
+        "tags": ["Courses"],
+        "summary": "Get course details and curriculum with strict tenant verification (IDOR protection)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Course details" },
+          "404": { "description": "Course not found or belongs to another tenant" }
+        }
+      }
+    },
+    "/quizzes": {
+      "get": {
+        "tags": ["Quizzes"],
+        "summary": "List quizzes for course or tenant",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "courseId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "List of quizzes" }
+        }
+      },
+      "post": {
+        "tags": ["Quizzes"],
+        "summary": "Create a new quiz (Instructors & Admins only)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "201": { "description": "Quiz created" }
+        }
+      }
+    },
+    "/quizzes/{id}": {
+      "get": {
+        "tags": ["Quizzes"],
+        "summary": "Retrieve quiz and sanitized questions (correct answers hidden for students)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Quiz with questions" }
+        }
+      }
+    },
+    "/quizzes/{id}/submit": {
+      "post": {
+        "tags": ["Quizzes"],
+        "summary": "Submit quiz answers for algorithmic evaluation and score generation",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/QuizSubmission" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Quiz graded with score breakdown and pass/fail status" }
+        }
+      }
+    },
+    "/announcements": {
+      "get": {
+        "tags": ["Announcements"],
+        "summary": "List announcements with Redis caching",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Announcements" }
+        }
+      },
+      "post": {
+        "tags": ["Announcements"],
+        "summary": "Broadcast new announcement via Socket.IO WebSocket gateway",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "201": { "description": "Announcement posted" }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "List users in tenant",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Users" }
+        }
+      }
+    },
+    "/users/invite": {
+      "post": {
+        "tags": ["Users"],
+        "summary": "Invite user with role guardrails",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "201": { "description": "User invited" }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Liveness and readiness health probe for MongoDB and Redis",
+        "responses": {
+          "200": { "description": "All subsystems healthy" },
+          "503": { "description": "One or more subsystems degraded" }
+        }
+      }
+    }
+  }
+}

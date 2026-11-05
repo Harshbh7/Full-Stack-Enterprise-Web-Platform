@@ -1,22 +1,26 @@
 import { Response, NextFunction } from 'express';
-import { Announcement } from '../models/Announcement.js';
 import { AuthenticatedRequest } from '../types/index.js';
+import { announcementService } from '../services/announcement.service.js';
 import { sendSuccess, sendCreated } from '../utils/response.util.js';
+import { getPaginationParams, buildPaginationMeta } from '../utils/pagination.util.js';
+import { BadRequestError } from '../utils/errors.util.js';
 
 export class AnnouncementController {
   async listAnnouncements(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const filter: Record<string, unknown> = {};
-      if (req.user?.role !== 'SUPER_ADMIN' && req.tenantId) {
-        filter.tenantId = req.tenantId;
-      }
+      const { page, limit, skip, sortBy, sortOrder } = getPaginationParams(req);
+      const courseId = req.query.courseId as string | undefined;
+      const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
 
-      const items = await Announcement.find(filter)
-        .populate('authorId', 'firstName lastName role avatarUrl')
-        .sort({ createdAt: -1 })
-        .limit(20);
+      const result = await announcementService.listAnnouncements(
+        req.tenantId,
+        isSuperAdmin,
+        courseId,
+        { page, limit, skip, sortBy, sortOrder }
+      );
 
-      return sendSuccess(res, items, 'Announcements retrieved');
+      const meta = buildPaginationMeta(result.total, page, limit);
+      return sendSuccess(res, result.items, 'Announcements retrieved', 200, meta);
     } catch (error) {
       next(error);
     }
@@ -24,17 +28,29 @@ export class AnnouncementController {
 
   async createAnnouncement(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.tenantId) {
+        throw new BadRequestError('Tenant context is required to create an announcement');
+      }
+
       const { title, content, priority, courseId } = req.body;
-      const announcement = await Announcement.create({
-        tenantId: req.tenantId,
-        authorId: req.user?.userId,
-        title,
-        content,
-        priority: priority || 'NORMAL',
-        courseId: courseId || undefined,
-      });
+      const announcement = await announcementService.createAnnouncement(
+        { title, content, priority, courseId },
+        req.tenantId,
+        req.user?.userId || ''
+      );
 
       return sendCreated(res, announcement, 'Announcement posted successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteAnnouncement(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
+      await announcementService.deleteAnnouncement(id, req.tenantId, isSuperAdmin);
+      return sendSuccess(res, null, 'Announcement deleted successfully');
     } catch (error) {
       next(error);
     }

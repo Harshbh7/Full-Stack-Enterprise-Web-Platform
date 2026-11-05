@@ -34,6 +34,47 @@ export class AuthController {
     }
   }
 
+  async googleSso(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email, name, tenantSlug, requestedRole } = req.body;
+      const userAgent = req.header('user-agent');
+      const ipAddress = req.ip;
+
+      const result = await authService.loginWithGoogleSso(
+        email,
+        name,
+        tenantSlug,
+        requestedRole,
+        userAgent,
+        ipAddress
+      );
+
+      if (result.refreshToken) {
+        res.cookie('edusphere_refresh_token', result.refreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+      }
+
+      return sendSuccess(
+        res,
+        {
+          accessToken: result.accessToken,
+          user: result.user,
+          tenant: result.tenant,
+          isPending: result.isPending,
+        },
+        result.isPending
+          ? 'Registration submitted. Account pending verification.'
+          : 'Google Workspace SSO authentication successful'
+      );
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async refresh(req: Request, res: Response, next: NextFunction) {
     try {
       const refreshToken = req.cookies?.edusphere_refresh_token || req.body?.refreshToken;

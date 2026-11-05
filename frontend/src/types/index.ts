@@ -8,6 +8,9 @@ export interface User {
   role: UserRole;
   tenantId?: string;
   avatarUrl?: string;
+  status?: 'ACTIVE' | 'PENDING_VERIFICATION' | 'REJECTED' | 'INACTIVE';
+  requestedRole?: UserRole;
+  verifierRole?: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'INSTRUCTOR';
 }
 
 export interface Tenant {
