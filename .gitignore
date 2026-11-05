@@ -53,3 +53,4 @@ scratch/
 .vite/
 .playwright-mcp/
 *.png
+*.sync_users.json

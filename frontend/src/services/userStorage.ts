@@ -89,7 +89,7 @@ export const DEFAULT_USERS: StoredUser[] = [
     password: 'Password123!',
   },
 
-  // Lovely Professional University (LPU) - ONLY the provisioned Tenant Admin! No predefined dummy students/instructors
+  // Lovely Professional University (LPU)
   {
     id: 'usr-lpu-admin',
     name: 'Lovely Administrator',
@@ -100,6 +100,20 @@ export const DEFAULT_USERS: StoredUser[] = [
     status: 'ACTIVE',
     tenantSlug: 'lpu',
     password: 'Password123!',
+  },
+  {
+    id: 'usr-lpu-anuj',
+    name: 'Anuj Bhardwaj',
+    firstName: 'Anuj',
+    lastName: 'Bhardwaj',
+    email: 'anuj123@gmail.com',
+    role: 'INSTRUCTOR',
+    requestedRole: 'INSTRUCTOR',
+    status: 'PENDING_VERIFICATION',
+    tenantSlug: 'lpu',
+    authProvider: 'GOOGLE',
+    requestedAt: '2026-11-05T08:20:00.000Z',
+    verifierRole: 'TENANT_ADMIN',
   },
 
   // Oakridge College Admin
@@ -163,7 +177,20 @@ export function getAllStoredUsers(): StoredUser[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Merge any new default users (including pending verifications) so existing localStorages get updated
+        let hasNew = false;
+        const merged = [...parsed];
+        for (const def of DEFAULT_USERS) {
+          const existing = merged.find((u) => u.email.toLowerCase() === def.email.toLowerCase());
+          if (!existing) {
+            merged.unshift(def);
+            hasNew = true;
+          }
+        }
+        if (hasNew) {
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
+        }
+        return merged;
       }
     }
   } catch {
@@ -252,8 +279,8 @@ export function requestGoogleRegistration(data: {
     data.role === 'TENANT_ADMIN'
       ? 'SUPER_ADMIN'
       : data.role === 'INSTRUCTOR'
-      ? 'TENANT_ADMIN'
-      : 'INSTRUCTOR';
+        ? 'TENANT_ADMIN'
+        : 'INSTRUCTOR';
 
   const parts = data.name.trim().split(' ');
   const firstName = parts[0] || 'User';
